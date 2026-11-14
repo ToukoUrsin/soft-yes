@@ -145,6 +145,9 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         if hit:
             i["check"] = {"status": "lead", **hit}
             tally["lead"] += 1
+        elif listed and page_leads and (short := _short_lead(i["name"], [v for k, v in c["leads"].items() if k in by_key and k not in elsewhere])):
+            i["check"] = {"status": "lead", **short, "short_name": True}   # the lead sentence names it by its short name
+            tally["lead"] += 1
         elif listed and page_leads:
             # the page names the lead and lists this investor among the others: a co-investor, not the lead
             i["is_lead"] = False
@@ -234,6 +237,27 @@ def _led_by(page_leads: list[str], quote: str | None, me: str) -> list[str]:
     return out
 
 
+GENERIC_FIRST = {"nordic", "north", "south", "east", "west", "capital", "venture", "ventures", "global", "first", "fund",
+                 "partners", "tech", "digital", "general", "united", "national", "european", "euro", "american", "asia",
+                 "pacific", "blue", "green", "black", "white", "open", "next", "future", "alpha", "beta", "seed", "angel"}
+
+
+def _short_lead(name: str, hits: list[dict]) -> dict | None:
+    """A page can name a lead by the first word of its name alone: "led by Prosus Ventures, UBS and MUFG" names
+    MUFG Innovation Partners. Then the page says it led, and Cala's claim stands. The word has to stand alone
+    ("Nordic" in "Nordic Ninja" is another firm) and be more than a common word."""
+    words = name.split()
+    first = words[0] if len(words) > 1 else ""
+    if len(first) < 4 or first.lower() in GENERIC_FIRST:
+        return None
+    alone = re.compile(rf"(?<![A-Za-z0-9]){re.escape(first)}(?![A-Za-z0-9])(?!\s+[A-Z0-9&])")
+    for h in hits:
+        q = pagecheck.tidy(h.get("quote") or "")
+        if any(pagecheck._says_led(q, m.start(), m.end()) for m in alone.finditer(q)):
+            return h
+    return None
+
+
 def _note_check(rd: dict, c: dict | None, findings: list[dict], claims: list[list]) -> None:
     """Keep what the pages changed, so the result can show it: every lead claim with its outcome, and each lead,
     amount or stage where the page disagrees with Cala."""
@@ -259,6 +283,11 @@ def _note_check(rd: dict, c: dict | None, findings: list[dict], claims: list[lis
                 findings[-1].update({"date": ch["page_date"], "cala_date": rd["date"]})
             if ch.get("two_rounds"):
                 findings[-1]["note"] = "Cala's pages name two different leads here: it holds two rounds of this company as one."
+                # Cala's one stage label cannot belong to both: keep it only where the page's own sentence carries it
+                on_page = pagecheck.stages_at_lead(ch.get("quote") or "")
+                if rd.get("stage") not in on_page:
+                    was = next(iter(on_page)) if len(on_page) == 1 else None
+                    findings[-1]["stage_name"] = graph.STAGE_NAMES.get(was, was) if was else "Round"
     aside = rd.get("amount_set_aside") or {}
     if aside.get("why") == "page" and co:
         findings.append({**base, "kind": "amount", "amount": aside["amount"], "currency": aside["currency"], "pages": read})

@@ -113,7 +113,7 @@ export function layout(model: GraphModel, d: Dims): Layout {
   })
   const roundsBottom = cursor
 
-  // Leads: beside the rounds they led once settled, in order of appearance while the walk runs.
+  // Leads: in ranked order beside the rounds they led once settled, in order of appearance while the walk runs.
   const leads = [...model.leads]
   if (model.settled) {
     const centre = (rounds: string[]) => {
@@ -121,7 +121,8 @@ export function layout(model: GraphModel, d: Dims): Layout {
       return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : roundsBottom
     }
     const want = new Map(leads.map((l) => [l.key, centre(l.rounds)]))
-    leads.sort((a, b) => want.get(a.key)! - want.get(b.key)! || (a.rank ?? 999) - (b.rank ?? 999))
+    // The column reads top to bottom as the ranking does; each lead still sits as near its rounds as that order allows.
+    leads.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999) || want.get(a.key)! - want.get(b.key)!)
     const pos: number[] = []
     leads.forEach((l, i) => {
       // on a phone the first row is a soft yes's name, which runs across the lead column
