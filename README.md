@@ -15,7 +15,7 @@ Type the investors who told you that. Soft Yes then
 1. walks Cala's graph: the rounds those investors joined, and who led each one,
 2. opens the page Cala cites for every "led" and looks for the sentence that says so,
 3. ranks the leads that hold by how often and how recently they lead,
-4. writes the intro request to the investor who said yes, from those facts only.
+4. opens on one answer: the lead to ask first, the page's sentence that says it led, and the intro request to the investor who said yes, written from those facts only.
 
 A lead that survives has already done a deal with your investor, and you can quote the sentence that proves it.
 
@@ -32,6 +32,15 @@ So a "led" in Cala counts only when the cited page says it:
 Example from the live site (Tesi + Innovestor, Series A): Cala credits Lifeline Ventures with three rounds next to Tesi. The pages confirm one (Verda: "The round comprises equity led by Lifeline Ventures, with participation from byFounders, Tesi, and Varma"). For Measur and Seaber the pages name VentureFriends and GTT Strategic Ventures. Those two never reach an email.
 
 All of it is public at [/audit](https://soft-yes.fly.dev/audit): the totals over every walk, ten claims at random, the corrections as a CSV, and "Check a company" for any company by name.
+
+## Does it find the real lead?
+
+We tested the walk on rounds that already happened. Each of 167 past rounds was hidden together with everything dated after it, and the walk was run from the investors who followed.
+
+- From two followers the real lead was on the list in 11 of 41 rounds (27%). A lead picked at random from the same year is there 11% of the time.
+- From one follower it was 5 of 126, no better than chance.
+
+So give it two, and read the list as doors your investors can open, not as a forecast. The numbers, three hits and a miss are at the bottom of [/audit](https://soft-yes.fly.dev/audit#backtest). `uv run python -m softyes.backtest --dry` recomputes them from the cache with no Cala call.
 
 ## How Cala is used
 
@@ -76,7 +85,8 @@ No model picks, ranks or checks a lead.
 - Everything on screen is live data read from Cala during the hackathon. There is no mock data and no hand-written answer. The examples on the home page are real walks, served from the cache.
 - The audit numbers are counted from the stored walks when you open the page. They grow as people use it.
 - Some cited pages do not open (paywalls, dead links). Some do not say who led. Both are shown as what they are.
-- Cala does not hold every round of every fund. Each investor shows how many rounds Cala lists for it.
+- Cala does not hold every round of every fund. Each investor shows how many rounds Cala lists for it, and how many of its "led" flags a page has confirmed so far.
+- With too few rounds to rank, the result says so and shows a list, not a first pick.
 - "Says vs did" reads only the public pages of a fund's own site.
 - Nothing is sent for you. The intro request and the Slush note are drafts.
 - On the public site one visitor can cause 150 fresh Cala calls a day. After that it serves what has already been read.
@@ -95,7 +105,7 @@ Without the Gemini key the drafts come from the template. Without the Oxylabs ke
 
 ## Where things are
 
-- `softyes/walk.py` the walk and the ranking · `softyes/pagecheck.py` the page check · `softyes/graph.py` and `softyes/cala.py` the Cala client · `softyes/extras.py` drafts, says vs did, Slush · `softyes/mcp.py` the MCP server · `softyes/api.py` the HTTP API
+- `softyes/walk.py` the walk and the ranking · `softyes/pagecheck.py` the page check · `softyes/backtest.py` the test on past rounds · `softyes/graph.py` and `softyes/cala.py` the Cala client · `softyes/extras.py` drafts, says vs did, Slush · `softyes/mcp.py` the MCP server · `softyes/api.py` the HTTP API
 - `web/` the React app · `deploy/` the Fly setup · `film/` the demo film's source
 - [BUILD_LOG.md](BUILD_LOG.md) what was built when
 

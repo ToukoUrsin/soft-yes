@@ -75,7 +75,7 @@ const LINES = [
 	['turn', 0.8, `${say(f1.company)}'s round was led by ${f1.page[0]}.`],
 	['turn', 0.35, `Only ${say(L.company)} holds, word for word.`],
 	['turn', 0.35, `${cap(words(K.claimed))} became ${words(K.held)}. Write, you led ${say(f0.company)}, and the intro is gone.`],
-	['lead', 0.3, `And ${first(L.name)} still leads: ${words(L.recent)} rounds in the last ${span(L.months)}.`],
+	['lead', 0.3, `And Cala has ${first(L.name)} leading ${words(L.recent)} rounds in the last ${span(L.months)}.`],
 	['ask', 0.3, `So ask ${Q.to} for the intro. Gemini writes the request.`],
 	['ask', 0.35, 'Code checks every name and number in it against the facts.'],
 	['audit', 0.3, `Don't take our word. Across every walk, ${words(U.confirmed)} lead claims hold word for word. ${cap(words(U.corrected))} were wrong.`],

@@ -446,12 +446,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if ((e as Error).name === 'AbortError') throw e
     }
     if (res?.ok) {
-      const body = await res.json()
-      // A slow answer is sent behind a trickle of spaces, so a failure after that arrives inside a 200.
-      if (body && typeof body === 'object' && typeof body.failed === 'number') {
-        throw new ApiError(body.failed, typeof body.detail === 'string' ? body.detail : `The server answered ${body.failed}.`)
+      let body: unknown
+      let cut = false
+      try {
+        body = await res.json()
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') throw e
+        cut = true   // the line dropped while the answer was still arriving: ask again like any other drop
       }
-      return body as T
+      if (!cut) {
+        // A slow answer is sent behind a trickle of spaces, so a failure after that arrives inside a 200.
+        const b = body as { failed?: unknown; detail?: unknown } | null
+        if (b && typeof b === 'object' && typeof b.failed === 'number') {
+          throw new ApiError(b.failed, typeof b.detail === 'string' ? b.detail : `The server answered ${b.failed}.`)
+        }
+        return body as T
+      }
+      res = null
     }
     const transient = !res || (res.status >= 502 && res.status <= 504)
     if (transient && attempt < RETRY_MS.length) {

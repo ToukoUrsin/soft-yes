@@ -21,6 +21,8 @@ Everything here was built at Junction 2026, after hacking opened on Friday 13 No
 - **07:52** Page check in the UI. A page older than its round can no longer confirm that round.
 - **08:08** Quotes read the way the page does. The picker takes the top match on Enter only when the name starts with what was typed.
 - **Morning** Says vs did moves onto the lead rows: the fund's own sentence next to what Cala shows it did, for the first five leads. Oxylabs search finds a fund's site when Cala has none. One visitor can no longer spend everyone's Cala credits. Names typed with markup are searched as plain words.
+- **09:00** The result opens on the answer: one lead, the page's sentence, the message. Reports from Cala's knowledge search count only with their own sentence. One record per investor, so every walk shows the same numbers for it.
+- **10:30** A backtest on 167 past rounds, shown with its misses on the audit page. Led counts say how many a page has confirmed. A reload picks a live walk up again.
 
 ## How it was built
 
