@@ -24,7 +24,15 @@ COMPANY_BODY = {
                       "outgoing": {"PARTICIPATES_IN_FUNDING_ROUND": {"limit": 20},
                                    "OPERATES_IN_INDUSTRY": {"limit": 10}}}}
 
+COMPANY_ROUNDS_BODY = {"properties": ["name"], "relationships": {"outgoing": {
+    "PARTICIPATES_IN_FUNDING_ROUND": {"limit": 10}}}}
+
+PEOPLE_BODY = {"properties": ["name"], "relationships": {"incoming": {
+    "FOUNDED": {"limit": 6}, "IS_CEO_OF": {"limit": 3}, "WORKS_AT": {"limit": 8}}}}
+
 ROUND_CAP = 50  # Cala returns at most 50 relationships of one type per entity
+NOT_INVESTORS = {"cofounder", "founder", "founders", "undisclosed", "angel", "angels", "angelinvestors", "investors",
+                 "others", "management", "employees", "ceo", "existinginvestors", "businessangels", "undisclosedinvestors"}
 
 LEGAL = {"oy", "oyj", "ab", "ltd", "limited", "llc", "llp", "lp", "inc", "gmbh", "as", "sa", "sas", "bv", "ky",
          "plc", "corp", "co", "ag", "aps", "oü", "spa", "srl", "sl", "kg", "scsp", "fcre", "sgeic"}
@@ -45,16 +53,16 @@ def norm(name: str) -> str:
 
 
 def pretty(name: str) -> str:
-    """'NORDICNINJA VC LIMITED' -> 'Nordicninja VC'. Mixed-case names are left as Cala has them."""
-    name = (name or "").strip()
+    """'NORDICNINJA VC LIMITED' -> 'Nordicninja VC', 'VNV Global AB (publ)' -> 'VNV Global'. Mixed case is kept."""
+    name = re.sub(r"\s*\((publ|uk|us|usa|eu|de|fr|se|fi)\)", "", (name or "").strip(), flags=re.I)
     if not name:
         return name
     words = name.split()
-    while len(words) > 1 and re.sub(r"\W", "", words[-1]).lower() in LEGAL:
+    while len(words) > 1 and (re.sub(r"\W", "", words[-1]).lower() in LEGAL or not re.sub(r"\W", "", words[-1])):
         words.pop()
-    if name.isupper():
-        words = [w if w.lower() in ACRONYMS and len(w) <= 4 else w.capitalize() for w in words]
-        words = [w.upper() if w.lower() in ACRONYMS else w for w in words]
+    if name.isupper() and not (len(words) == 1 and len(words[0]) <= 4):
+        words = [w.upper() if w.lower() in ACRONYMS or (len(w) <= 3 and len(words) > 1 and w.isalpha() and n == 0)
+                 else w.capitalize() for n, w in enumerate(words)]
     return " ".join(words).rstrip(",")
 
 
@@ -171,19 +179,82 @@ async def company(cala: Cala, uid: str, ledger: Ledger | None = None, cache_only
     investors, seen = [], set()
     for x in (rel.get("incoming") or {}).get("INVESTED_IN", []):
         key = norm(x["name"])
-        if key in seen:
+        if key in seen or key in NOT_INVESTORS:
             continue
         seen.add(key)
         investors.append({"id": x["id"], "name": pretty(x["name"]), "type": x.get("entity_type"),
                           "kind": kind(x.get("entity_type")),
                           "sources": sources((x.get("properties") or {}).get("sources"))[:2]})
     out = rel.get("outgoing") or {}
-    return {"id": uid, "name": pretty(val("name") or d.get("name") or ""), "description": val("description") or d.get("description"),
+    return {"id": uid, "name": pretty(val("name") or d.get("name") or ""),
+            "description": fix_text(val("description") or d.get("description")),
             "website": val("website"), "founded": val("founding_date"), "total_funding": val("total_funding"),
             "currency": val("total_funding_units"), "stage": val("funding_stage"), "hq": val("headquarters_address"),
             "investors": investors,
             "rounds": [{"id": r["id"], "label": r.get("name")} for r in out.get("PARTICIPATES_IN_FUNDING_ROUND", [])],
-            "industries": [{"id": i["id"], "name": i["name"]} for i in out.get("OPERATES_IN_INDUSTRY", [])]}
+            "industries": list({i["name"]: {"id": i["id"], "name": i["name"].replace("_", " ").capitalize()}
+                                for i in out.get("OPERATES_IN_INDUSTRY", [])}.values())}
+
+
+async def company_rounds(cala: Cala, cid: str, ledger: Ledger | None = None, cache_only: bool = False) -> list[dict] | None:
+    """One call: the funding rounds a company raised, each with the date it was first reported."""
+    d = await cala.call("POST", f"/entities/{cid}", body=COMPANY_ROUNDS_BODY, ledger=ledger, cache_only=cache_only)
+    if d is None:
+        return None
+    out = []
+    for r in ((d.get("relationships") or {}).get("outgoing") or {}).get("PARTICIPATES_IN_FUNDING_ROUND", []):
+        p = r.get("properties") or {}
+        if p.get("role") not in (None, "ISSUER"):
+            continue
+        srcs = sources(p.get("sources"))
+        out.append({"id": r["id"], "label": r.get("name"), "sources": srcs, "reported": first_report_date(srcs)})
+    return out
+
+
+async def company_people(cala: Cala, cid: str, ledger: Ledger | None = None, cache_only: bool = False) -> list[dict] | None:
+    """One call: a company's founders and chief executive, each with the source that names them."""
+    d = await cala.call("POST", f"/entities/{cid}", body=PEOPLE_BODY, ledger=ledger, cache_only=cache_only)
+    if d is None:
+        return None
+    inc = (d.get("relationships") or {}).get("incoming") or {}
+    people: dict[str, dict] = {}
+    for rel, role in (("FOUNDED", "Founder"), ("IS_CEO_OF", "CEO"), ("WORKS_AT", None)):
+        for x in inc.get(rel, []):
+            if x.get("entity_type") != "Person":
+                continue
+            xp = x.get("properties") or {}
+            r = role or (xp.get("role") or "").strip()
+            if rel == "WORKS_AT" and not re.search(r"\b(ceo|chief executive|founder|cto|coo)\b", r, re.I):
+                continue
+            key = norm(x["name"])
+            p = people.setdefault(key, {"id": x["id"], "name": x["name"], "roles": [], "sources": []})
+            r = "CEO" if re.fullmatch(r"(ceo|chief executive( officer)?)", r, re.I) else r
+            for part in re.split(r"\s*(?:&|,| and )\s*", r):
+                part = {"co-founder": "Founder", "cofounder": "Founder", "founder": "Founder", "ceo": "CEO"}.get(part.lower(), part)
+                if part and part not in p["roles"]:
+                    p["roles"].append(part)
+            for src in sources(xp.get("sources")):
+                if src["url"] not in {y["url"] for y in p["sources"]}:
+                    p["sources"].append(src)
+    out = []
+    for p in people.values():
+        roles = sorted(p["roles"], key=lambda r: {"Founder": 0, "CEO": 1}.get(r, 2))[:2]
+        out.append({"id": p["id"], "name": p["name"], "role": " & ".join(roles), "sources": p["sources"][:2]})
+    out.sort(key=lambda p: (("CEO" not in p["role"]), ("Founder" not in p["role"]), p["name"]))
+    return out
+
+
+def fix_text(s: str | None) -> str | None:
+    """Undo UTF-8 text that was decoded as Latin-1 somewhere upstream ('whatâ\x80\x99s' -> 'what’s')."""
+    if not s or not any(ch in s for ch in "âÃ"):
+        return s
+    try:
+        return s.encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        try:
+            return s.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return s
 
 
 def years_ago(iso: str | None, today: date | None = None) -> float | None:

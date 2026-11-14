@@ -20,11 +20,20 @@ DIST = ROOT / "web" / "dist"
 FRAMING = os.environ.get("SOFTYES_FRAMING", "softyes")  # softyes | investor_check | conflict_check
 
 EXAMPLES = [
-    {"id": "nordic-deeptech", "title": "Nordic deep tech, Series A",
-     "blurb": "Tesi and Innovestor said they'd follow.",
+    {"id": "nordic-deeptech", "title": "Tesi + Innovestor", "blurb": "Nordic deep tech, Series A",
      "soft_yeses": [{"name": "Tesi", "ids": ["df5be140-d50e-4e21-bb4f-d8f1e4ad3959"], "kind": "fund"},
                     {"name": "Innovestor", "ids": ["6a966907-4006-4a4b-8d11-2330f76cb3cd"], "kind": "fund"}],
      "stage": "SERIES_A"},
+    {"id": "eic", "title": "EIC Fund", "blurb": "EIC Accelerator equity needs a lead investor",
+     "soft_yeses": [{"name": "EIC Fund", "ids": ["02a2a281-4d2f-4647-9af3-cae7ac067489"], "kind": "fund"}],
+     "stage": "SERIES_A"},
+    {"id": "seed-europe", "title": "Seedcamp + Bpifrance", "blurb": "European seed",
+     "soft_yeses": [{"name": "Seedcamp", "ids": ["d2d11954-6bab-5ac9-8684-a54406623104",
+                                                  "aa87dde8-7dc3-4fc0-957f-143da6ddc0b7"], "kind": "fund"},
+                    {"name": "Bpifrance", "ids": ["340af901-9ea9-424b-b09d-ec471bbe4f63",
+                                                   "96cc5581-3419-4dc9-bb45-828af172ac35",
+                                                   "b8f60f04-9fb0-4a59-8913-8ad92cba937c"], "kind": "fund"}],
+     "stage": "SEED"},
 ]
 
 INDEX: dict[str, dict] = {}   # norm(name) -> {key, name, ids, kind, type, description, rounds}
@@ -80,7 +89,9 @@ async def lifespan(app: FastAPI):
         c.db.execute("create table if not exists runs(run_id text primary key, created real, inputs text, result text)")
         c.db.execute("create table if not exists blobs(key text primary key, created real, value text)")
     build_index()
+    warm = asyncio.create_task(extras.slush_firms())  # who is at Slush: read once, in the background
     yield
+    warm.cancel()
 
 
 app = FastAPI(title="Soft Yes", lifespan=lifespan)
@@ -95,7 +106,7 @@ def _credits() -> dict:
 async def config():
     return {"framing": FRAMING, "stages": [{"id": s, "name": graph.STAGE_NAMES[s]} for s in graph.STAGE_ORDER[:5]],
             "credits": _credits(), "index_size": len(INDEX), "gemini": extras.gemini_ready(),
-            "oxylabs": extras.oxylabs_ready()}
+            "oxylabs": extras.oxylabs_ready(), "slush": extras.slush_directory()}
 
 
 @app.get("/api/examples")
@@ -198,10 +209,21 @@ def load_run(run_id: str) -> dict | None:
     return json.loads(row[0]) if row else None
 
 
+def _annotate(result: dict) -> dict:
+    """Mark who is registered for Slush. Done on read, so a stored run picks up the live directory."""
+    for e in result["leads"] + result["second_ring"] + result["soft_yeses"]:
+        e["at_slush"] = extras.at_slush(e["name"])
+    result["slush"] = {**extras.slush_directory(),
+                       "leads_attending": sum(1 for e in result["leads"] if e["at_slush"])}
+    return result
+
+
 async def _run(inputs: dict, emit) -> dict:
-    result = await walk_mod.walk(cala_mod.get(), inputs, emit)
+    result = await walk_mod.walk(cala_mod.get(), inputs, emit,
+                                 aliases=lambda key: list(INDEX.get(key, {}).get("ids", [])))
     result["credits"] = _credits()
     _save_run(inputs, result)
+    _annotate(result)
     for s in result["soft_yeses"]:
         for uid in s["ids"]:
             _index_add(uid, s["name"], None, s.get("description"), 0)
@@ -250,7 +272,7 @@ async def run(run_id: str):
     result = load_run(run_id)
     if not result:
         raise HTTPException(404, "No such run")
-    return result
+    return _annotate(result)
 
 
 @app.get("/api/investor")
@@ -314,6 +336,13 @@ async def ask(run_id: str, lead_key: str, q: str = ""):
     """One cited answer from Cala's knowledge search about this lead."""
     result, lead = _lead(run_id, lead_key)
     return await extras.ask(cala_mod.get(), lead, q[:200])
+
+
+@app.get("/api/references")
+async def references(run_id: str, lead_key: str):
+    """Founders whose rounds this lead led, named by Cala: who to call for a reference."""
+    result, lead = _lead(run_id, lead_key)
+    return await extras.references(cala_mod.get(), lead)
 
 
 @app.get("/api/slush")

@@ -25,6 +25,10 @@ VERIFY_TOP = 5      # leads whose most recent led rounds are opened to get the r
 VERIFY_ROUNDS = 2
 RING2_TOP = 6       # co-investors checked for "sat beside you and leads elsewhere"
 RECENT_MONTHS = 24
+THIN_FOLLOWED = 3    # below this many followed rounds, also walk the soft yes's cap tables
+CAP_COMPANIES = 8    # portfolio companies opened on that path
+CAP_ROUNDS = 2       # most recent rounds opened per portfolio company
+CAP_WEIGHT = 0.6     # "led a round in a company you both back" counts less than "led a round you joined"
 SOFT_LED_ROUNDS = 3  # a soft yes's own most recent led rounds, opened for the follower profile
 
 Emit = Callable[[dict], Awaitable[None]]
@@ -85,6 +89,21 @@ def _pulse(inv: dict) -> dict:
             "capped": inv["capped"], "portfolio_size": len(inv["portfolio"])}
 
 
+def _merge(invs: list[dict]) -> dict:
+    """One investor from the several Cala entities that are it: rounds and portfolio de-duplicated."""
+    rounds, portfolio, seen_r, seen_c = [], [], set(), set()
+    for inv in invs:
+        for r in inv["rounds"]:
+            if r["id"] not in seen_r:
+                seen_r.add(r["id"])
+                rounds.append(r)
+        for c in inv["portfolio"]:
+            if c["id"] not in seen_c:
+                seen_c.add(c["id"])
+                portfolio.append(c)
+    return {**invs[0], "rounds": rounds, "portfolio": portfolio, "capped": any(i["capped"] for i in invs)}
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
@@ -98,8 +117,16 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
     out = []
     softs = sorted({w for d in e["evidence"] for w in d["with"]})
     n = len(e["evidence"])
+    same = [d for d in e["evidence"] if d["relation"] == "round"]
+    cap = [d for d in e["evidence"] if d["relation"] == "cap_table"]
     if e["ring"] == 1:
-        out.append({"tone": "good", "text": f"Led {_plural(n, 'round')} that {_names(softs)} joined"})
+        if same:
+            out.append({"tone": "good", "text": f"Led {_plural(len(same), 'round')} that "
+                                                f"{_names(sorted({w for d in same for w in d['with']}))} joined"})
+        if cap:
+            out.append({"tone": "good" if not same else "plain",
+                        "text": f"Led {_plural(len(cap), 'round')} in companies "
+                                f"{_names(sorted({w for d in cap for w in d['with']}))} backs"})
     else:
         out.append({"tone": "plain", "text": f"Sat in {_plural(n, 'round')} with {_names(softs)} without leading"})
     p = e.get("pulse")
@@ -108,8 +135,10 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
             out.append({"tone": "good", "text": f"Led {_plural(p['led_recent'], 'round')} in the last {p['recent_months']} months"})
         elif p["rounds"]:
             out.append({"tone": "warn", "text": f"No lead dated in the last {p['recent_months']} months in Cala"})
-        if p["rounds"]:
+        if p["rounds"] >= 3:
             out.append({"tone": "plain", "text": f"Leads {p['led']} of its {p['rounds']} rounds in Cala" + ("+" if p["capped"] else "")})
+        elif p["rounds"]:
+            out.append({"tone": "plain", "text": f"Cala lists only {_plural(p['rounds'], 'round')} for it"})
     else:
         out.append({"tone": "plain", "text": "Own record not read (outside the top of this walk)"})
     f = e.get("fit")
@@ -142,16 +171,23 @@ def _headline(softs: list[dict], leads: list[dict]) -> str:
     if not leads:
         return f"Cala shows no outside investor leading a round that {names} joined."
     top = leads[0]
-    line = f"{_plural(len(leads), 'investor')} led rounds that {names} joined. Start with {top['name']}"
+    same = any(d["relation"] == "round" for e in leads for d in e["evidence"])
+    cap = any(d["relation"] == "cap_table" for e in leads for d in e["evidence"])
+    where = (f"rounds that {names} joined" + (" or in companies they back" if cap else "")) if same else \
+        f"rounds in companies that {names} back{'s' if len(softs) == 1 else ''}"
+    line = f"{_plural(len(leads), 'investor')} led {where}. Start with {top['name']}"
     p = top.get("pulse")
+    n = len(top["evidence"])
     if p and p["led_recent"]:
-        line += f": it led {_plural(len(top['evidence']), 'of them').replace(' of thems', ' of them')} and {_plural(p['led_recent'], 'round')} in the last {p['recent_months']} months."
+        line += (f": it led {n} of those rounds and {_plural(p['led_recent'], 'round')} "
+                 f"in the last {p['recent_months']} months.")
     else:
         line += "."
     return line
 
 
-async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
+async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], list[str]] | None = None) -> dict:
+    """`aliases(key)` may return further Cala entity ids already known to be the same investor."""
     t0 = time.time()
     ledger = Ledger()
     notes: list[str] = []
@@ -186,6 +222,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
     # 1. Each soft yes: its rounds, then every round it joined without leading.
     rounds: dict[str, dict] = {}            # round id -> round
     joined: dict[str, set[str]] = collections.defaultdict(set)   # round id -> soft keys that followed in it
+    backed: dict[str, set[str]] = collections.defaultdict(set)   # round id -> soft keys that back the company (cap table)
 
     async def walk_soft(s: dict):
         invs = [i for i in await asyncio.gather(*(guarded(graph.investor, uid) for uid in s["ids"])) if i]
@@ -198,7 +235,13 @@ async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
         led = [r for r in all_rounds if r["is_lead"]]
         followed = sorted((r for r in all_rounds if not r["is_lead"]), key=lambda r: r["reported"] or "", reverse=True)
         todo = followed[:FOLLOW_CAP]
-        merged = {"id": s["ids"][0], "name": s["name"], "rounds": all_rounds, "portfolio": [],
+        portfolio, seen_co = [], set()
+        for inv in invs:
+            for c in inv["portfolio"]:
+                if c["id"] not in seen_co:
+                    seen_co.add(c["id"])
+                    portfolio.append(c)
+        merged = {"id": s["ids"][0], "name": s["name"], "rounds": all_rounds, "portfolio": portfolio,
                   "capped": any(i["capped"] for i in invs)}
         s.update({"found": bool(invs), "rounds_in_cala": len(all_rounds), "led": len(led), "followed": len(followed),
                   "lead_rate": round(len(led) / len(all_rounds), 2) if all_rounds else None,
@@ -235,13 +278,52 @@ async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
         await asyncio.gather(*(open_round(r) for r in todo), *(open_led(r) for r in recent_led))
         s["led_rounds"] = sorted(own, key=lambda d: d["date"] or "", reverse=True)
 
+        # Few rounds on record: Cala often knows the investor's portfolio better than its rounds.
+        # Walk the cap tables too: portfolio company -> its rounds -> who led them.
+        s["cap_companies"] = 0
+        if len(followed) < THIN_FOLLOWED and portfolio:
+            own_ids = {r["id"] for r in all_rounds}
+            issuers = {rd["issuer"]["id"] for rd in rounds.values() if rd.get("issuer")}
+            pick = [c for c in sorted(portfolio, key=lambda c: max((x["date"] or "" for x in c["sources"]), default=""),
+                                      reverse=True) if c["id"] not in issuers][:CAP_COMPANIES]
+            s["cap_companies"] = len(pick)
+            await emit({"t": "captable", "soft": s["key"], "name": s["name"], "companies": len(pick), **ledger.as_dict()})
+
+            async def open_company(c):
+                listed = await guarded(graph.company_rounds, c["id"])
+                recent = sorted((r for r in listed or [] if r["id"] not in own_ids),
+                                key=lambda r: r["reported"] or "", reverse=True)[:CAP_ROUNDS]
+
+                async def open_cap_round(r):
+                    rd = await guarded(graph.funding_round, r["id"])
+                    if not rd:
+                        return
+                    if not rd["date"]:
+                        rd["date"] = r["reported"]
+                        rd["date_is_report"] = True
+                    if not rd["issuer"]:
+                        rd["issuer"] = {"id": c["id"], "name": c["name"]}
+                    rounds.setdefault(rd["id"], rd)
+                    in_round = any(i["id"] in s["ids"] or graph.norm(i["name"]) == s["key"] for i in rd["investors"])
+                    (joined if in_round else backed)[rd["id"]].add(s["key"])
+                    leads = [i for i in rd["investors"] if i["is_lead"] and i["id"] not in soft_ids
+                             and graph.norm(i["name"]) not in soft_keys]
+                    await emit({"t": "round", "soft": s["key"], "via": "round" if in_round else "cap_table",
+                                "round": _round_brief(rd),
+                                "leads": [{"key": graph.norm(i["name"]), "name": i["name"], "kind": i["kind"]} for i in leads],
+                                "others": len(rd["investors"]) - len(leads), **ledger.as_dict()})
+
+                await asyncio.gather(*(open_cap_round(r) for r in recent))
+
+            await asyncio.gather(*(open_company(c) for c in pick))
+
     await asyncio.gather(*(walk_soft(s) for s in softs))
 
     # 2. Who led those rounds, and who else sat in them.
     leads: dict[str, dict] = {}
     cos: dict[str, dict] = {}
     for rid, rd in rounds.items():
-        with_keys = sorted(joined[rid])
+        with_keys = sorted(joined[rid] | backed[rid])
         for i in rd["investors"]:
             key = graph.norm(i["name"])
             if i["id"] in soft_ids or key in soft_keys or not key:
@@ -262,13 +344,16 @@ async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
             out.append({**_round_brief(rd), "date_is_report": rd.get("date_is_report", False),
                         "with": [next(s["name"] for s in softs if s["key"] == k) for k in link["with"]],
                         "with_keys": link["with"],
+                        # "round": the soft yes was in this round. "cap_table": it backs the company, round not on record.
+                        "relation": "round" if any(k in joined[rid] for k in link["with"]) else "cap_table",
                         "co_leads": [i["name"] for i in rd["investors"] if i["is_lead"] and graph.norm(i["name"]) != e["key"]],
                         "investors": len(rd["investors"]), "sources": srcs[:4]})
         out.sort(key=lambda d: d["date"] or "", reverse=True)
         return out
 
     def base_score(ev: list[dict]) -> float:
-        s = sum(_recency(d["date"]) * _stage_weight(d["stage"], want_stage) for d in ev)
+        s = sum(_recency(d["date"]) * _stage_weight(d["stage"], want_stage) *
+                (1.0 if d["relation"] == "round" else CAP_WEIGHT) for d in ev)
         return s * (1 + 0.35 * (len({k for d in ev for k in d["with_keys"]}) - 1))
 
     for e in leads.values():
@@ -280,9 +365,14 @@ async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
 
     # 3. Each lead's own record: does it lead often, recently, at this stage?
     async def read_pulse(e: dict):
-        inv = await guarded(graph.investor, e["ids"][0])
-        if not inv:
+        # Cala sometimes holds one investor as two or three entities: read each and merge.
+        for uid in (aliases(e["key"]) if aliases else []):
+            if uid not in e["ids"]:
+                e["ids"].append(uid)
+        invs = [i for i in await asyncio.gather(*(guarded(graph.investor, uid) for uid in e["ids"][:3])) if i]
+        if not invs:
             return
+        inv = _merge(invs)
         e["_inv"] = inv
         e["pulse"] = _pulse(inv)
         e["portfolio"] = inv["portfolio"][:50]
@@ -375,12 +465,13 @@ async def walk(cala: Cala, inputs: dict, emit: Emit) -> dict:
             if n:
                 counts[e["name"]] = n
         soft_out.append({k: s.get(k) for k in ("key", "name", "ids", "kind", "found", "rounds_in_cala", "led", "followed",
-                                                "lead_rate", "walked", "capped", "pulse", "description", "led_rounds")}
+                                                "lead_rate", "walked", "capped", "pulse", "description", "led_rounds", "cap_companies")}
                         | {"usual_leads": [{"name": n, "deals": c} for n, c in counts.most_common(5)],
                            "followed_rounds": sorted(
                                ({**_round_brief(rd), "leads": [i["name"] for i in rd["investors"] if i["is_lead"]],
+                                 "relation": "round" if s["key"] in joined[rid] else "cap_table",
                                  "sources": rd["sources"][:2]}
-                                for rid, rd in rounds.items() if s["key"] in joined[rid]),
+                                for rid, rd in rounds.items() if s["key"] in joined[rid] or s["key"] in backed[rid]),
                                key=lambda d: d["date"] or "", reverse=True)})
 
     for s in soft_out:

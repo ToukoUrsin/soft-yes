@@ -16,7 +16,7 @@ from datetime import date
 import httpx
 
 from . import cala as cala_mod
-from . import graph
+from . import graph, slush_mcp
 from .cala import BudgetExceeded, Cala, CalaError
 
 GEMINI_MODEL = os.environ.get("SOFTYES_GEMINI_MODEL", "gemini-3.8-flash")
@@ -490,6 +490,41 @@ async def ask(cala: Cala, lead: dict, q: str) -> dict:
             "facts": len(bits), "entities": [{"id": e["id"], "name": e["name"]} for e in (d.get("entities") or [])[:12]]}
 
 
+# ------------------------------------------------------------------------------------------ references
+
+REFERENCE_COMPANIES = 4
+
+
+async def references(cala: Cala, lead: dict) -> dict:
+    """Founders this lead has already led: the people to call before you take its money.
+
+    Every name comes from Cala with the page that names the person as founder or chief executive.
+    """
+    seen, picks = set(), []
+    for d in lead.get("recent_leads") or []:
+        co = d.get("issuer")
+        if co and co.get("id") and co["id"] not in seen:
+            seen.add(co["id"])
+            picks.append(d)
+    picks = picks[:REFERENCE_COMPANIES]
+
+    async def one(d: dict):
+        try:
+            people = await graph.company_people(cala, d["issuer"]["id"])
+        except BudgetExceeded:
+            people = await graph.company_people(cala, d["issuer"]["id"], cache_only=True)
+        except CalaError:
+            people = None
+        return {"company": d["issuer"], "round": {k: d.get(k) for k in ("id", "stage_name", "date", "amount", "currency")},
+                "round_sources": (d.get("sources") or [])[:2], "people": (people or [])[:3]}
+
+    rows = await asyncio.gather(*(one(d) for d in picks))
+    named = [r for r in rows if r["people"]]
+    return {"lead": lead["name"], "companies_checked": len(rows), "references": named,
+            "unnamed": [r["company"]["name"] for r in rows if not r["people"]],
+            "people": sum(len(r["people"]) for r in named)}
+
+
 # ---------------------------------------------------------------------------------------------- slush
 
 def _rich_text(node) -> str:
@@ -526,9 +561,48 @@ async def slush_events() -> list[dict]:
     return out
 
 
+_firms: dict[str, dict] | None = None
+
+
+async def slush_firms() -> dict[str, dict]:
+    """Investor firms registered for Slush 2026, read through the Slush MCP (read-only) and kept for 12 hours."""
+    global _firms
+    if _firms is not None:
+        return _firms
+    hit = blob_get("slush:firms", max_age=12 * 3600)
+    if hit is None and slush_mcp.ready():
+        try:
+            hit = await slush_mcp.investors()
+            if hit:
+                blob_put("slush:firms", hit)
+        except (slush_mcp.SlushError, httpx.HTTPError, ValueError, KeyError):
+            hit = blob_get("slush:firms")  # a stale list beats none
+    _firms = hit or {}
+    return _firms
+
+
+def at_slush(name: str) -> dict | None:
+    """Head count and job titles of this investor's people in the Slush attendee directory. No names."""
+    m = slush_mcp.match(_firms or {}, name)
+    if not m:
+        return None
+    titles = []
+    for p in m["people"]:
+        t = re.sub(r"\s+(at|@)\s+.*$", "", p.get("title") or "", flags=re.I).strip(" ,")
+        if t and t not in titles:
+            titles.append(t)
+    return {"firm": m["firm"], "people": len(m["people"]), "titles": titles[:4]}
+
+
+def slush_directory() -> dict:
+    return {"connected": slush_mcp.ready(), "firms": len(_firms or {}),
+            "people": sum(len(f["people"]) for f in (_firms or {}).values())}
+
+
 async def slush(lead: dict) -> dict:
-    """Is this lead visibly at Slush 2026? Public side events it hosts or is named in."""
+    """Is this lead at Slush 2026? The attendee directory (Slush MCP) and public side events it hosts or is named in."""
     events = await slush_events()
+    await slush_firms()
     name = lead["name"]
     pat = re.compile(r"(?<![a-z0-9])" + r"[\s.-]*".join(re.escape(w) for w in name.lower().split()) + r"(?![a-z0-9])")
     found = []
@@ -545,6 +619,7 @@ async def slush(lead: dict) -> dict:
                           "snippet": ("…" if a else "") + hay[a:b].strip() + ("…" if b < len(hay) else "")})
     found.sort(key=lambda f: (f["role"] != "host", f["start"] or ""))
     return {"lead": name, "events_checked": len(events), "events": found[:5],
+            "attending": at_slush(name), "directory": slush_directory(),
             "slush": {"starts": "2026-11-18", "ends": "2026-11-19", "days_away": (date(2026, 11, 18) - date.today()).days},
             "meeting_tool": {"note_limit": 300, "slot_minutes": 25},
             "source": {"publisher": "slush.org", "url": "https://slush.org/side-events"}}
