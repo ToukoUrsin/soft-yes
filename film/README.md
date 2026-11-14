@@ -2,7 +2,8 @@
 
 Films of Soft Yes, made from recordings of the live product.
 
-- `out/demo-3.mp4` (69 s) is the current cut: Soft Yes inside Claude. How it is made: "The cut made inside Claude" below.
+- `out/film.mp4` (1:43) is the film to show: the 10 s cold open, then `out/demo-3.mp4`. The site serves it at `/film.mp4`.
+- `out/demo-3.mp4` (93 s) is the current cut: Soft Yes inside Claude. How it is made: "The cut made inside Claude" below.
 - `out/demo-2.mp4` (87 s) shows the website; `out/screenshot.png` is its reveal frame (the walk folded into the ranked list).
 - `out/demo-v1.mp4` is the first, two minute cut (a copy is at `../judging/demo.mp4`).
 
@@ -39,16 +40,27 @@ sheets (about 15 seconds). `node scripts/reveal.mjs` prints the second of the re
 
 ## The cut made inside Claude
 
-`out/demo-3.mp4`: the question typed into claude.ai, the search drawing in the chat, the list, the soft
-yes, the ask written in the card. Its run output is under `/bulk3/runs/cala/film-claude/`.
+`out/demo-3.mp4`: the question typed into claude.ai, the search drawing in the chat, the list with the way in
+link by link and the sum behind the first place, the soft yes with the lead the page corrects, the ask written
+in the card. Its run output is under `/bulk3/runs/cala/film-claude/`.
 
 ```sh
 export FILM_BULK=/bulk3/runs/cala/film-claude
-# 1. record the four shots in a signed-in Claude (cfind and cwalk each send one message; clist and cdraft reopen those chats)
-film/capture/quiet-net.sh run uv run -q --offline --with playwright python film/capture/claude_shots.py cfind clist cwalk cdraft
-# 2. voice, render, review
-cd film && hsec exec --only ELEVENLABS_API_KEY -- node scripts/make-vo.mjs --cut3 && ./render.sh 3 && scripts/review.sh out/demo-3.mp4
+# 1. record the five shots in a signed-in Claude (cfind and cwalk each send one message; clist, cfix and cdraft reopen those chats)
+python3 film/capture/claude_session.py
+film/capture/quiet-net.sh run uv run -q --offline --with playwright python film/capture/claude_shots.py cfind cwalk clist cfix cdraft
+# 2. voice, render, review (CONCURRENCY keeps the render small on a shared machine)
+cd film && hsec exec --only ELEVENLABS_HELIOS_API_KEY -- bash -c 'ELEVENLABS_API_KEY="$ELEVENLABS_HELIOS_API_KEY" node scripts/make-vo.mjs --cut3' \
+  && CONCURRENCY=12 ./render.sh 3 && scripts/review.sh out/demo-3.mp4
+# 3. the cold open in front: out/film.mp4
+(cd ~/junction/opens && python3 softyes/refresh.py --check) && ./join.sh
 ```
+
+- The open is `/bulk3/runs/opens/final/softyes/open.mp4` (made in `~/junction/opens/softyes/`, notes in that folder's
+  README). It ends on the film's own window with nothing in it, so `join.sh` brings the film's first screen up
+  inside it. `OPEN_MUTE=1 ./join.sh` leaves the open silent. If the film's first frame changes (another window
+  or background), the open's last frame has to be made again first: steps in the open's README.
+- In the shots the pointer rests next to what it shows, never on a name or a number.
 
 - The shots need a Claude session with the Soft Yes connector on and its tools on "Always allow".
   `capture/claude_session.py` keeps the session in `/dev/shm`, never in the repo.
@@ -56,9 +68,8 @@ cd film && hsec exec --only ELEVENLABS_API_KEY -- node scripts/make-vo.mjs --cut
 - `src/scenes3.tsx` is the edit, `src/data/cap3.json` what the shots saw, `src/data/vo3.json` the spoken lines,
   `src/data/timing3.json` the scene order.
 - A quick look without a full render: `COMP=Film3Silent scripts/sheets.sh`.
-- The music is the first cut's bed with seven bars taken out (`public/audio/music-c3-70.mp3`), so it ends at 70 s.
-- 14 Nov: the ElevenLabs credits ran out (they come back about 5 Dec). The cut is made from lines already
-  voiced. A changed line needs credits first.
+- The music is a bed made for this length (`public/audio/music-c3-94.mp3`; `--music` makes a new one when the length changes).
+- The voice key is `ELEVENLABS_HELIOS_API_KEY` (the Helios grant). `ELEVENLABS_API_KEY` has no credits until about 5 Dec.
 
 ## What is where
 

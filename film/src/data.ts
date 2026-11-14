@@ -9,7 +9,7 @@ import {FPS} from './theme';
 // What the capture saw (film/capture/capture.py, and claude_shots.py for the cut made inside Claude) and what the voice says (film/scripts/make-vo.mjs).
 export type Box = [number, number, number, number];
 export type Clip = {file: string; w: number; h: number; dur: number; marks: Record<string, number>; boxes: Record<string, number[]>; facts: any};
-export const cap = {...capJson, ...cap3Json} as unknown as Record<'walk' | 'check' | 'page' | 'lead' | 'ask' | 'audit' | 'next' | 'cfind' | 'clist' | 'cwalk' | 'cdraft', Clip>;
+export const cap = {...capJson, ...cap3Json} as unknown as Record<'walk' | 'check' | 'page' | 'lead' | 'ask' | 'audit' | 'next' | 'cfind' | 'clist' | 'cwalk' | 'cfix' | 'cdraft', Clip>;
 export type ClipName = keyof typeof cap;
 export const box = (clip: ClipName, name: string): Box => {
 	const b = cap[clip].boxes[name];

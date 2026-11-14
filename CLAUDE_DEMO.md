@@ -1,6 +1,6 @@
 # Soft Yes in Claude: the demo
 
-Checked 14.11 at 23:25 EET on claude.ai in Chrome, on your Claude account. Soft Yes is added there and set to "Always allow", so nothing asks for a click.
+Checked 15.11 at 01:05 EET on claude.ai in Chrome, on your Claude account. Soft Yes is added there and set to "Always allow", so nothing asks for a click.
 
 ## Before you walk over
 
@@ -18,7 +18,7 @@ Say while it draws:
 
 > "We ask your graph for companies like ours, then read their rounds and what you have on each investor. When your data says a fund led a round, we open the page you cite and check it. Nothing in the card comes from a language model."
 
-The card comes in about 25 s. Point at:
+The card comes in about 15 s and draws for 10 more. Point at:
 
 1. The list. **Ovni Capital** and **Contrarian Ventures** led Bleu Robotics's €5M pre-seed two weeks ago. Ovni is already open, with the sentence from thesaasnews.com under it.
 2. **The way in**, under Ovni. None of Cala AI's investors has sat in a round with Ovni, so the search read further. Point down the chain: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital. Kfund is already Cala AI's investor, so that's three introductions. Each one is a round both sat in, and the tick next to it says the page for that round names both funds. Click a round's name to open its page. **Accel** is one step: 3 rounds with Lightspeed.
@@ -45,7 +45,7 @@ Say:
 
 > "Second example, a company further along. A soft yes is an investor who is in once someone leads. So we look at who led the rounds they joined, and check each 'led' against the page you cite."
 
-1. The card draws in about 10 s. Tesi and Innovestor on the left, the rounds they joined in the middle, who led them on the right. A tick means the page Cala cites says the same. Wrong ones are struck through.
+1. The card comes in about 15 s. Tesi and Innovestor on the left, the rounds they joined in the middle, who led them on the right. A tick means the page Cala cites says the same. Wrong ones are struck through.
 2. Right under the graph: **The page names another lead**. Cala's line "Lifeline Ventures led Measur's round" is struck. Under it is the page's own sentence: "The round was led by VentureFriends and joined by existing investors Lifeline Ventures, Tesi, and Curus." Point at the struck line, then the sentence. This is the moment nobody else has.
 3. The numbers: 407 facts from Cala, 78 pages read, 47 "led" claims hold, 2 do not.
 4. Lead 1 is **Emergence Capital**: it led Verda's $189M Series B in September with Tesi in the round. **Lifeline Ventures** is second. Next to each: "Tesi opens the door".

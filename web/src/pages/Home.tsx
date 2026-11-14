@@ -386,7 +386,7 @@ function SoftYesAsk({ config }: { config: Config | null }) {
               <CopyButton text={config.mcp} label="Copy" className="btn btn--ghost btn--sm" />
             </div>
             <p>
-              <a className="link" href="/chat">See it without Claude</a> · <a className="link" href="/film.mp4">Watch the film (69 s)</a>
+              <a className="link" href="/chat">See it without Claude</a> · <a className="link" href="/film.mp4">Watch the film (1:43)</a>
             </p>
           </div>
         )}

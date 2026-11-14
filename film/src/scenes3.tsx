@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig} from 'remotion';
-import {type Scene3, box, cap, cut3} from './data';
+import {type Box, type Scene3, box, cap, cut3} from './data';
 import {C, FPS, MONO, SANS, clamp, ease, pop, soft} from './theme';
 import {type Cam, type Hi, type Seg, Head, Mark, SceneFade, Shot, Stage, WIN} from './ui';
 
@@ -120,38 +120,67 @@ export const Draw3: React.FC = () => {
 	);
 };
 
-// ------------------------------------------------------------------------------------------------ 3. the list: a lead with the page's sentence, and a way in
+// ------------------------------------------------------------------------------------------------ 3. the list: a lead with the page's sentence, the way in link by link, the sum behind its rank, then a way in of one introduction
 export const List3: React.FC = () => {
 	const {end} = useT();
 	const M = cap.clist.marks;
-	const [, c1] = cues('list');
-	const tWay = c1.s - 0.5;
-	const row = box('clist', 'way_row');
+	const [, c1, c2, c3] = cues('list');
+	const B = (n: string) => box('clist', n);
+	const tDown = c1.s - 0.7; // the chat moves down to the way in just before the voice gets there
+	const tChain = tDown + (M.chain - M.down); // the scroll is over
+	const tSum = c2.s - 0.3;
+	const tCut = c2.e + 0.15; // cut down the list, to the first investor one introduction away
+	const tClick = tCut + 0.8;
+	const tUp = tClick + 0.35; // the row is open; the still second before the chat brings it up is cut
+	const names = LIST.chain.names as string[];
+	const nameBox = (i: number): Box => [B(`name${i}`)[0] - 4, B(`name${i}`)[1], 44 + names[i].length * 10.8, B(`name${i}`)[3]];
+	const linkBox = (i: number): Box => [B(`link${i}`)[0] + 22, B(`link${i}`)[1] + 2, 800, B(`link${i}`)[3] - 6];
+	const word = (n: string) => n.split(' ')[0].toLowerCase();
+	// each fund of the chain is outlined as the voice names it; the investor itself is the last one, and the line names it twice
+	const at = names.map((n, i) => (i === 0 ? 0 : said('list', 1, word(n), i === names.length - 1 ? 1 : 0) - 0.15));
+	const tEach = said('list', 1, 'each') - 0.15;
 	return (
 		<SceneFade>
 			<Head
 				tag="THE LIST"
 				items={[
 					{t: 0, text: `1 · ${LIST.leads[0].name}: the page says it led`},
-					{t: c1.s - 0.1, text: `${LIST.way.name}: ${num(LIST.way.line, /Sat in (\d+)/)} rounds with an investor you know`},
+					{t: c1.s - 0.1, text: `The way in: ${names.length - 2} introductions, each a round they shared`},
+					{t: c2.s - 0.1, text: `${num(LIST.sum.label, /^(Why #\d+)/)}: a sum you can read`},
+					{t: tCut, text: `${LIST.way.name}: ${num(LIST.way.line, /Sat in (\d+)/)} rounds with an investor you know`},
 				]}
 			/>
 			<Stage>
 				<Shot
 					clip="clist"
-					segs={[
-						[0, tWay, 0.3, M.way - 1.0],
-						[tWay, end, M.way - 1.0],
-					]}
+					to={tCut}
+					segs={[...play(0, tDown, M.proof - 0.8, M.down), ...play(tDown, tSum, M.down, M.sum), [tSum, tCut, M.sum]]}
 					cams={[
-						{t: 0, r: [392, box('clist', 'head1')[1] - 30, 1136]},
-						{t: tWay + 1.7, d: 0.8, r: [392, row[1] - 26, 1136]},
+						{t: 0, r: [392, B('head1')[1] - 30, 1136]},
+						{t: tChain, d: M.chain - M.down, r: [360, B('chain')[1] - 36, 1200]}, // the whole way in, and the sum under it
+						{t: c2.s + 0.9, d: 1.1, r: [404, B('name4')[1] - 40, 1000]}, // closer: the sum, under the investor it is for
 					]}
 					his={[
-						{box: box('clist', 'line1'), from: said('list', 0, 'led') - 0.25, to: said('list', 0, "cala's") - 0.3, pad: 5, color: GREEN},
-						{box: box('clist', 'proof'), from: said('list', 0, "cala's") - 0.3, to: tWay + 0.4, pad: 4, color: GREEN},
-						{box: box('clist', 'way_line'), from: said('list', 1, 'sat') + 0.5, to: end + 1, pad: 5, color: GREEN},
+						{box: B('line1'), from: said('list', 0, 'led') - 0.25, to: said('list', 0, "cala's") - 0.3, pad: 5, color: GREEN},
+						{box: B('proof'), from: said('list', 0, "cala's") - 0.3, to: tDown + 0.1, pad: 4, color: GREEN},
+						...names.slice(1).map((_, k) => ({box: nameBox(k + 1), from: Math.max(at[k + 1], tChain + 0.1), to: k + 2 < names.length ? at[k + 2] + 0.1 : tEach + 0.1, pad: 3, color: GREEN})),
+						...names.slice(1, -1).map((_, k) => ({box: linkBox(k + 1), from: tEach + k * 0.3, to: tSum + 0.2, pad: 0, color: GREEN})),
+						{box: [B('sum')[0], B('sum')[1], 880, B('sum')[3]], from: c2.s + 0.9, to: tCut + 1, pad: 6, color: GREEN},
 					]}
+					bg={WHITE}
+				/>
+				<Shot
+					clip="clist"
+					from={tCut}
+					segs={[
+						[tCut, tUp, M.way - 0.8],
+						[tUp, end, M.up - 0.1],
+					]}
+					cams={[
+						{t: 0, r: [392, B('way_row0')[1] - 380, 1136]},
+						{t: tUp + 1.25, d: 1.15, r: [392, B('way_row')[1] - 8, 1136]}, // up with the chat as it brings the open row to the top
+					]}
+					his={[{box: B('way_line'), from: Math.max(said('list', 3, 'sat') + 0.5, tUp + 1.75), to: end + 1, pad: 5, color: GREEN}]}
 					bg={WHITE}
 				/>
 			</Stage>
@@ -159,15 +188,21 @@ export const List3: React.FC = () => {
 	);
 };
 
-// ------------------------------------------------------------------------------------------------ 4. the soft yes: who led the rounds they joined, by the page
+// ------------------------------------------------------------------------------------------------ 4. the soft yes: who led the rounds they joined, by the page, and the lead the page corrects
 export const Soft3: React.FC = () => {
 	const {end} = useT();
 	const M = cap.cwalk.marks;
-	const [, c1, c2] = cues('soft');
+	const [, c1, c2, c3] = cues('soft');
 	const tCard = c1.s - 0.3;
 	const tDone = tCard + (M.done - (M.card - 0.1)); // the card plays at its real speed
 	const led = box('cwalk', 'ledger');
 	const chk = /(\d+) pages read\. (\d+) “led” claims hold word for word, (\d+) do not/.exec(WALK.read) || [];
+	// the lead the page corrects: the same card opened again when it is done, framed the same, so the cut does not show
+	const X = cap.cfix.marks;
+	const fix = cap.cfix.facts.fixes[0];
+	const tFix = c2.e;
+	const tFixes = tFix + (X.fixes - (X.down - 0.4)); // the chat has come down to the corrected leads
+	const tPage = said('soft', 3, 'page') - 0.35; // the pointer goes to the page's line as the voice does; the still seconds before are cut
 	return (
 		<SceneFade>
 			<Head
@@ -176,6 +211,7 @@ export const Soft3: React.FC = () => {
 					{t: 0, text: '“We’re in, if you find a lead.”'},
 					{t: c1.s, text: 'The rounds they joined, and who led them'},
 					{t: c2.s, text: `${chk[1]} pages read · ${chk[2]} “led” hold · ${chk[3]} do not`},
+					{t: c3.s - 0.1, text: `Cala’s lead is struck: the page says ${num(fix.page, /^(.+?) led$/)} led`},
 				]}
 			/>
 			<Stage>
@@ -183,11 +219,26 @@ export const Soft3: React.FC = () => {
 				<Shot
 					clip="cwalk"
 					from={tCard}
+					to={tFix}
 					segs={[[tCard, end, M.card - 0.1]]}
 					cams={[{t: 0, r: [392, led[1] - 17, 1136]}]}
 					his={[
 						{box: box('cwalk', 'read'), from: Math.max(said('soft', 2, 'forty') - 0.5, tDone - 0.6), to: end + 1, pad: -3, color: GREEN},
 						{box: box('cwalk', 'cell1'), from: Math.max(said('soft', 2, 'two') - 0.2, tDone + 0.2), to: end + 1, pad: -4, color: AMBER},
+					]}
+					bg={WHITE}
+				/>
+				<Shot
+					clip="cfix"
+					from={tFix}
+					segs={[
+						[tFix, tPage, X.down - 0.4],
+						[tPage, end, X.page - 0.6],
+					]}
+					cams={[{t: 0, r: [392, box('cfix', 'ledger')[1] - 17, 1136]}]}
+					his={[
+						{box: box('cfix', 'fix_cala'), from: Math.max(said('soft', 3, 'lifeline') - 0.2, tFixes + 0.1), to: tPage + 0.3, pad: 4, color: AMBER},
+						{box: box('cfix', 'fix_page'), from: said('soft', 3, 'page') + 0.1, to: end + 1, pad: 4, color: GREEN},
 					]}
 					bg={WHITE}
 				/>

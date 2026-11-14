@@ -21,6 +21,9 @@ const words = (n) => {
 	if (n < 20) return ONES[n];
 	if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? '-' + ONES[n % 10] : '');
 	if (n < 1000) return ONES[Math.floor(n / 100)] + ' hundred' + (n % 100 ? ' and ' + words(n % 100) : '');
+	// 1,172 is said "eleven hundred and seventy-two"; a round thousand, and anything from 2,000 up, by its thousands
+	if (n < 2000 && n % 1000 >= 100) return words(Math.floor(n / 100)) + ' hundred' + (n % 100 ? ' and ' + words(n % 100) : '');
+	if (n < 1e6) return words(Math.floor(n / 1000)) + ' thousand' + (n % 1000 ? (n % 1000 < 100 ? ' and ' : ' ') + words(n % 1000) : '');
 	return String(n);
 };
 const cap = (t) => t[0].toUpperCase() + t.slice(1);
@@ -89,7 +92,7 @@ const LINES = [
 const CUT3 = A.includes('--cut3');
 const lines3 = () => {
 	const C3 = JSON.parse(fs.readFileSync(path.join(film, 'src/data/cap3.json'), 'utf8'));
-	const F = need(C3.cfind?.facts, 'cfind'), Li = need(C3.clist?.facts, 'clist'), Wk = need(C3.cwalk?.facts, 'cwalk'), D = need(C3.cdraft?.facts, 'cdraft');
+	const F = need(C3.cfind?.facts, 'cfind'), Li = need(C3.clist?.facts, 'clist'), Wk = need(C3.cwalk?.facts, 'cwalk'), Fx = need(C3.cfix?.facts, 'cfix'), D = need(C3.cdraft?.facts, 'cdraft');
 	const facts = +need(/([\d,]+) facts/.exec(F.ledger[0])?.[1], 'the count of facts').replace(/,/g, '');
 	if (!/^From a language model 0 facts/.test(F.ledger[3])) throw new Error('the card no longer shows 0 facts from a language model: rewrite the narration');
 	const top = Li.leads[0];
@@ -106,18 +109,31 @@ const lines3 = () => {
 	const door = /^(.+?) opens the door: it was in that round/.exec(lead.door || '');
 	if (!round || !door) throw new Error(`the first lead no longer has a door ("${lead.line}", "${lead.door}"): rewrite the narration`);
 	const stage = led[2].startsWith('Series') ? led[2] : led[2];
+	// the way in to the first investor, link by link: said only while every link's page names both funds
+	const ch = need(Li.chain, 'the way in under the first investor');
+	const short = (name) => name.replace(/ (Ventures|Capital|Partners)$/, '');
+	if (ch.names.length !== 5 || ch.names.at(-1) !== top.name) throw new Error(`the way in is no longer three introductions to ${top.name} (${ch.names.join(' > ')}): rewrite the narration`);
+	if (ch.pages.length !== ch.names.length - 2 || !ch.pages.every((x) => x.ok)) throw new Error(`a link of the way in is not confirmed by its page (${ch.pages.map((x) => x.text).join(' | ')}): rewrite the narration`);
+	if (!/^Why #1\b/.test(need(Li.sum, 'the sum behind the first rank').label)) throw new Error(`the first investor no longer shows "Why #1" ("${Li.sum.label}"): rewrite the narration`);
+	// the first lead the page corrects
+	const fx = need(Fx.fixes?.[0], 'a lead the page corrects');
+	const was = /^(.+?) led (.+?)’s /.exec(fx.cala), now = /^(.+?) led$/.exec(fx.page);
+	if (!was || !now) throw new Error(`the corrected lead no longer reads "X led Y's round" and "Z led" ("${fx.cala}", "${fx.page}"): rewrite the narration`);
 	return [
 		['ask', 0.2, `You're raising a ${stage} round. Who do you talk to? Ask Claude.`],
 		['draw', 0.25, "Soft Yes asks Cala's graph for companies like yours."],
 		['draw', 0.3, 'It reads their rounds, and who invested.'],
-		['draw', 0.3, 'And the rounds investors you know sat in. Anyone in those is one intro away.'],
+		['draw', 0.3, 'And the rounds an investor you know sat in. Everyone else in them is one intro away.'],
 		['draw', 0.3, "Then it reads Cala's record of each investor. Does it lead rounds? Is it still investing?"],
 		['draw', 0.35, `${cap(words(facts))} facts from Cala. None from a language model.`],
 		['list', 0.3, `Start with ${top.name}. It led a ${stage} like yours ${led[3] === when ? 'this month' : 'in ' + led[3].split(' ')[0]}. Cala's source page says so.`],
-		['list', 0.4, `${way.name} sat in ${words(+sat[1])} rounds with ${first(sat[2])}, an investor you know. That's your way in.`],
+		['list', 0.4, `Nobody you know has invested with ${short(top.name)}. So it reads further: from ${ch.names[1]}, who you know, to ${ch.names[2]}, to ${short(ch.names[3])}, to ${short(top.name)}. Each link is a round they shared, checked on the page.`],
+		['list', 0.4, `And this is why ${short(top.name)} comes first: a sum you can read.`],
+		['list', 1.3, `${way.name} sat in ${words(+sat[1])} rounds with ${first(sat[2])}, an investor you know. That's your way in.`],
 		['soft', 0.3, "Later, two investors say: we're in, if you find a lead."],
 		['soft', 0.4, "That's a soft yes. So it finds who led the rounds they joined."],
 		['soft', 0.3, `Then it reads Cala's source page for every lead. ${cap(words(+chk[1]))} check out. ${cap(words(+chk[2]))} don't.`],
+		['soft', 1.3, `Cala has ${first(was[1])} leading ${say(was[2])}'s round. The page says ${now[1]} led it. So it's struck out.`],
 		['draft', 0.3, `${lead.name} led ${say(round[1])}'s round with ${door[1]} in it. So ${door[1]} opens the door.`],
 		['draft', 0.35, `One click writes the ask to ${door[1]}.`],
 		['draft', 1.2, "Every fact in it is listed, with where it's from."],

@@ -12,6 +12,7 @@ src.backup(dst)
 dst.close(); src.close()
 PY
 uv export -q --no-hashes --no-dev > deploy/fly/requirements.txt
-# the demo film is served by the site at /film.mp4 (the file itself is not in git)
-if [ -f film/out/demo-3.mp4 ]; then cp film/out/demo-3.mp4 web/dist/film.mp4; fi
+# the demo film is served by the site at /film.mp4 (the file itself is not in git): the cut with its cold open in
+# front (film/join.sh), or the cut alone when that has not been made
+if [ -f film/out/film.mp4 ]; then cp film/out/film.mp4 web/dist/film.mp4; elif [ -f film/out/demo-3.mp4 ]; then cp film/out/demo-3.mp4 web/dist/film.mp4; fi
 exec hsec exec --only FLY_API_TOKEN -- flyctl deploy . --config deploy/fly/fly.toml --dockerfile deploy/fly/Dockerfile --ha=false --now
