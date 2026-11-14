@@ -96,6 +96,8 @@ async def lifespan(app: FastAPI):
     warm.cancel()
 
 
+BACKGROUND: set[asyncio.Task] = set()   # walks that outlive the request that started them
+
 app = FastAPI(title="Soft Yes", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=800)  # event streams are left alone
 
@@ -382,7 +384,7 @@ async def run(run_id: str):
 @app.get("/api/investor")
 async def investor(ids: str, name: str = ""):
     """Investor check: does this investor lead or follow, and who leads when it follows?"""
-    id_list = [i for i in ids.split(",") if len(i) == 36][:4]
+    id_list = [i for i in ids.split(",") if len(i) == 36][:6]   # as many as a soft yes carries, so both share one walk
     if not id_list:
         raise HTTPException(400, "ids required")
     c = cala_mod.get()
@@ -391,14 +393,28 @@ async def investor(ids: str, name: str = ""):
         name = inv["name"] if inv else "Investor"
     inputs = {"soft_yeses": [{"name": name, "ids": id_list, "kind": "fund"}], "stage": None, "company": None}
 
-    async def emit(_):
-        return None
+    # Answer with the first result. A thin record is read further in the background and stored; the page waits for it.
+    first: dict = {}
+    got = asyncio.Event()
 
-    result = await _run(inputs, emit)
+    async def emit(event: dict) -> None:
+        if event["t"] == "partial":
+            first["result"] = event["result"]
+            got.set()
+
+    task = asyncio.create_task(_run(inputs, emit))
+    BACKGROUND.add(task)
+    task.add_done_callback(BACKGROUND.discard)
+    waiter = asyncio.create_task(got.wait())
+    await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+    waiter.cancel()
     try:
-        result["profile"] = await graph.profile(c, id_list[0])
-    except CalaError:
-        result["profile"] = None
+        result = dict(task.result() if task.done() else first["result"])
+    except BudgetExceeded as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except CalaError as exc:
+        raise HTTPException(502, f"Cala did not answer: {exc}"[:200]) from exc
+    result["profile"] = await extras.best_profile(c, {"id": id_list[0], "ids": id_list})
     return result
 
 

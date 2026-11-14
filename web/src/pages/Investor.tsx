@@ -68,7 +68,21 @@ export function InvestorPage() {
     const ctl = new AbortController()
     setState({ result: null, error: null })
     api.investor(list, name, ctl.signal).then(
-      (r) => {
+      async (first) => {
+        setState({ result: first, error: null })
+        // A thin record is read further at the server: wait for the stored result and swap it in.
+        let r = first
+        for (let i = 0; r.pending?.length && i < 60 && !ctl.signal.aborted; i++) {
+          await new Promise((done) => setTimeout(done, 2500))
+          try {
+            const next = await api.run(first.run_id, ctl.signal)
+            if (!next.pending?.length) r = { ...next, profile: first.profile }
+          } catch {
+            /* offline for a moment: keep waiting */
+          }
+        }
+        if (ctl.signal.aborted) return
+        if (r.pending?.length) r = { ...r, pending: undefined }
         seen.set(ids, r)
         setState({ result: r, error: null })
       },
@@ -139,6 +153,16 @@ export function InvestorPage() {
           )}
         </header>
 
+        {!!result.pending?.length && (
+          <p className="deepline" role="status">
+            <i className="spinner" aria-hidden="true" />
+            <span>
+              <b>Still reading.</b> Cala’s graph is thin for {s.name}, so its knowledge search is reading reports that name it. This page
+              updates when it is done, usually within a minute.
+            </span>
+          </p>
+        )}
+
         {none ? (
           <div className="state">
             <strong>Cala has no funding rounds for {s.name}.</strong>
@@ -160,7 +184,7 @@ export function InvestorPage() {
               </div>
               <div>
                 <dt>Followed</dt>
-                <dd className="num">{s.followed ?? 0}</dd>
+                <dd className="num">{Math.max(s.followed ?? 0, followed.length)}</dd>
               </div>
               {p && (
                 <div>

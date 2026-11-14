@@ -78,11 +78,25 @@ export function LeadList({
 }: { result: Result; selected: string | null; onSelect: (key: string, byKeyboard: boolean) => void }) {
   return (
     <div className="leads" role="navigation" aria-label="Ranked leads">
-      <ol className="leads__list">
-        {result.leads.map((l) => (
-          <Row key={l.key} lead={l} selected={selected === l.key} onSelect={(kb) => onSelect(l.key, kb)} />
-        ))}
-      </ol>
+      {(result.tiers?.length ? result.tiers : [null]).map((t) => (
+        <div key={t?.id ?? 'all'} className="leads__tier">
+          {t && (
+            <div className={`leads__tierhead leads__tierhead--${t.id}`}>
+              <h3>
+                <i aria-hidden="true" />
+                {t.label}
+                <span className="count num">{t.count}</span>
+              </h3>
+              <p>{t.note}</p>
+            </div>
+          )}
+          <ol className="leads__list">
+            {result.leads.filter((l) => !t || l.tier === t.id).map((l) => (
+              <Row key={l.key} lead={l} selected={selected === l.key} onSelect={(kb) => onSelect(l.key, kb)} />
+            ))}
+          </ol>
+        </div>
+      ))}
       {result.second_ring.length > 0 && (
         <>
           <div className="leads__ring">
@@ -189,7 +203,14 @@ function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
         </h3>
         <ul className="deals">
           {lead.evidence.map((e) => (
-            <Deal key={e.id} round={e} sources={e.sources} dateNote={e.date_is_report ? 'Date the round was first reported' : undefined}>
+            <Deal
+              key={e.id}
+              round={e}
+              sources={e.sources}
+              dateNote={e.date_is_report ? 'Date the round was first reported' : undefined}
+              caution={e.caution}
+              setAside={e.amount_set_aside}
+            >
               {e.relation === 'cap_table' ? (
                 <>
                   <InvestorList names={e.with} /> {e.with.length === 1 ? 'backs' : 'back'} the company, not listed in this round

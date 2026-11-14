@@ -360,6 +360,26 @@ main.page {
   background: var(--bg-3);
 }
 
+/* Nothing moved yet: the top match is what Enter takes, and it says so. */
+.opt--top[aria-selected='true'] {
+  background: var(--bg-2);
+}
+
+.opt__side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.opt__side--none {
+  color: var(--warn);
+}
+
+.opt__enter {
+  font-size: var(--fs-micro);
+}
+
 .opt[aria-disabled] {
   cursor: default;
   opacity: 0.55;
@@ -534,6 +554,28 @@ main.page {
 
 .deal__sub .sources {
   margin-left: auto;
+}
+
+/* A fact on the row that Cala's sources do not fully back: said under the row, never hidden. */
+.deal__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  max-width: 68ch;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--warn);
+  text-wrap: pretty;
+}
+
+.deal__note svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.deal__note--plain {
+  color: var(--text-3);
 }
 
 .deal__sub .sources:first-child {
@@ -1289,6 +1331,52 @@ main.page {
 
 .why__i--warn i {
   background: var(--warn);
+}
+
+/* The list in bands: how much Cala holds on each lead decides the band, the score orders within it. */
+.leads__tier + .leads__tier {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.leads__tierhead {
+  padding: 14px 8px 6px 6px;
+}
+
+.leads__tier:first-child .leads__tierhead {
+  padding-top: 4px;
+}
+
+.leads__tierhead h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-s);
+  font-weight: 600;
+}
+
+.leads__tierhead h3 i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.leads__tierhead--active h3 i {
+  background: var(--accent);
+}
+
+.leads__tierhead--check h3 i {
+  background: var(--warn);
+}
+
+.leads__tierhead p {
+  margin-top: 2px;
+  padding-left: 13px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-wrap: pretty;
 }
 
 .leads__ring {

@@ -381,7 +381,7 @@ export function Run() {
               <section className="run__sec run__leads" ref={leadsRef} aria-label="Likely leads">
                 <div className="run__sechead">
                   <h2>
-                    Who could lead
+                    Who could lead{' '}
                     <span className="count num">{result.leads.length}</span>
                   </h2>
                   <p>

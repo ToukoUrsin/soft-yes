@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'wouter'
 import { investorHref, type Result, type Source } from '../lib/api'
-import { fmtDate, host } from '../lib/format'
+import { fmtDate, host, listAnd } from '../lib/format'
 
 // ------------------------------------------------------------------------------------------- icons
 // One family: 16px box, 1.5px stroke, round joins.
@@ -83,34 +83,47 @@ export function Sources({ sources, max = 3 }: { sources: Source[] | null | undef
         first.push(s)
       }
     }
-    return [...first, ...again]
+    // Pages cited for a fact on this row come before pages that are only about the round.
+    const cited = (s: Source) => (s.backs ? s.backs.length > 0 : true)
+    const all = [...first, ...again]
+    return [...all.filter(cited), ...all.filter((s) => !cited(s))]
   }, [sources])
   if (!list.length) return null
-  const shown = open ? list : list.slice(0, max)
+  const backing = list.filter((s) => !s.backs || s.backs.length > 0).length
+  const cut = backing ? Math.min(max, backing) : max
+  const shown = open ? list : list.slice(0, cut)
   return (
     <span className="sources">
       {shown.map((s) => {
         const name = (s.publisher || host(s.url)).replace(/^www\./, '')
         const when = fmtDate(s.date)
         const primary = s.rank === 'PRIMARY'
+        const backs = s.backs ?? []
+        const says = s.backs ? (backs.length ? `Cited for the ${listAnd(backs)}.` : 'About this round, but not cited for a fact shown here.') : ''
         return (
           <a
             key={s.url}
-            className="src"
+            className={`src${s.backs && !backs.length ? ' src--loose' : ''}`}
             href={s.url}
             target="_blank"
             rel="noopener noreferrer"
-            title={`${primary ? 'Primary source. ' : ''}${name}${when ? `, ${when}` : ''}\n${s.url}`}
+            title={`${primary ? 'Primary source. ' : ''}${name}${when ? `, ${when}` : ''}${says ? `\n${says}` : ''}\n${s.url}`}
           >
             {primary && <i className="src__primary" aria-label="primary source" />}
             <span>{name}</span>
+            {backs.length > 0 && <em className="src__backs">{backs.join(' · ')}</em>}
             <Icon name="out" size={11} />
           </a>
         )
       })}
-      {!open && list.length > max && (
-        <button type="button" className="src src--more" onClick={() => setOpen(true)} title="Show every source">
-          +{list.length - max}
+      {!open && list.length > cut && (
+        <button
+          type="button"
+          className="src src--more"
+          onClick={() => setOpen(true)}
+          title={backing && backing <= cut ? 'Other pages about this round' : 'Show every source'}
+        >
+          +{list.length - cut}
         </button>
       )}
     </span>

@@ -451,7 +451,7 @@ textarea.input {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  max-width: 190px;
+  max-width: 240px;
   height: 20px;
   padding: 0 6px;
   border-radius: var(--r-1);
@@ -491,6 +491,20 @@ textarea.input {
   height: 5px;
   border-radius: 50%;
   background: var(--text-2);
+}
+
+/* What the page is cited for on this row: lead, amount, date. */
+.src__backs {
+  flex: none;
+  font-style: normal;
+  color: var(--text-3);
+  padding-left: 5px;
+  border-left: 1px solid var(--line);
+}
+
+.src--loose {
+  border-style: dashed;
+  color: var(--text-3);
 }
 
 .src--more {

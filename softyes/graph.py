@@ -124,6 +124,23 @@ def sources(raw) -> list[dict]:
     return out
 
 
+def reported_before(srcs: list[dict], when: str | None, days: int = 60) -> str | None:
+    """If every dated page behind a fact is older than the round Cala attaches the fact to, the latest of those dates.
+
+    A page cannot report a round months before it happened, so such a fact belongs to an earlier event that Cala
+    folded into this round (a seed and its extension two years later held as one entity, for instance)."""
+    dates = [s["date"][:10] for s in srcs if s.get("date")]
+    if not when or not dates:
+        return None
+    try:
+        day = date.fromisoformat(when[:10])
+        if all((day - date.fromisoformat(d)).days > days for d in dates):
+            return max(dates)
+    except ValueError:
+        pass
+    return None
+
+
 def first_report_date(srcs: list[dict]) -> str | None:
     """Earliest dated report of a deal. A fund's own portfolio page carries the crawl date, not the deal date."""
     dated = [s["date"] for s in srcs if s.get("date") and not PORTFOLIO_URL.search(s["url"])]
@@ -172,27 +189,42 @@ async def funding_round(cala: Cala, rid: str, ledger: Ledger | None = None, cach
     d = await cala.call("POST", f"/entities/{rid}", body=ROUND_BODY, ledger=ledger, cache_only=cache_only)
     if d is None:
         return None
-    p = {k: v.get("value") for k, v in (d.get("properties") or {}).items()}
-    psrc = []
-    for v in (d.get("properties") or {}).values():
-        psrc += v.get("sources") or []
+    props = d.get("properties") or {}
+    p = {k: v.get("value") for k, v in props.items()}
+    when = p.get("announcement_date")
+    # Every fact keeps its own pages, so a number on screen can be checked against the page it came from.
+    tagged: dict[str, dict] = {}
+    for tag, name in (("date", "announcement_date"), ("amount", "transaction_value"), (None, "transaction_value_units"),
+                      (None, "round_label")):
+        for x in sources((props.get(name) or {}).get("sources")):
+            item = tagged.setdefault(x["url"], {**x, "backs": []})
+            if tag and tag not in item["backs"]:
+                item["backs"].append(tag)
     issuer, investors = None, []
     for x in ((d.get("relationships") or {}).get("incoming") or {}).get("PARTICIPATES_IN_FUNDING_ROUND", []):
         xp = x.get("properties") or {}
         item = {"id": x["id"], "name": pretty(x["name"]), "type": x.get("entity_type"), "kind": kind(x.get("entity_type")),
                 "is_lead": bool(xp.get("is_lead")), "sources": sources(xp.get("sources"))}
+        if item["is_lead"]:
+            item["lead_reported"] = reported_before(item["sources"], when)
         if xp.get("role") == "ISSUER":
             issuer = {"id": x["id"], "name": pretty(x["name"])}
         elif xp.get("role") in (None, "INVESTOR"):
             investors.append(item)
     label = p.get("round_label")
-    amount = p.get("transaction_value")
-    if label in ("PRE_SEED", "SEED") and isinstance(amount, (int, float)) and amount > 40_000_000:
+    amount = p.get("transaction_value") if isinstance(p.get("transaction_value"), (int, float)) else None
+    currency = p.get("transaction_value_units")
+    if label in ("PRE_SEED", "SEED") and amount and amount > 40_000_000:
         label = None  # a nine-figure "seed" is a labelling slip in the source; show the amount, claim no stage
+    set_aside = None
+    stale = reported_before([x for x in tagged.values() if "amount" in x["backs"]], when) if amount else None
+    if stale:   # the amount was reported before this round took place: it is some earlier round's size
+        set_aside = {"amount": amount, "currency": currency, "reported": stale}
+        amount = currency = None
     return {"id": rid, "stage": label, "stage_name": STAGE_NAMES.get(label or "", (label or "Round").replace("_", " ").title()),
-            "date": p.get("announcement_date"), "amount": amount if isinstance(amount, (int, float)) else None,
-            "currency": p.get("transaction_value_units"), "issuer": issuer, "investors": investors,
-            "sources": sources(psrc)}
+            "date": when, "amount": amount, "currency": currency, "amount_set_aside": set_aside,
+            "issuer": issuer, "investors": investors,
+            "sources": sorted(tagged.values(), key=lambda x: x.get("date") or "9999")}
 
 
 async def profile(cala: Cala, uid: str, ledger: Ledger | None = None, cache_only: bool = False) -> dict | None:

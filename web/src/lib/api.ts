@@ -8,7 +8,11 @@ export interface Source {
   url: string
   date?: string | null
   rank?: 'PRIMARY' | 'PRESS' | null
+  /** What this page is cited for on this row. Empty: it is about the round but backs none of the facts shown. */
+  backs?: Backs[]
 }
+
+export type Backs = 'lead' | 'amount' | 'date'
 
 export interface Issuer { id: string; name: string }
 
@@ -38,7 +42,14 @@ export interface Evidence extends RoundBrief {
   relation?: Relation
   via?: Via
   sources: Source[]
+  /** Cala's date for the round is later than every page that names this lead: the row shows the report's date. */
+  caution?: string | null
+  /** An amount Cala attaches to the round from a page older than the round. Not shown as the round's size. */
+  amount_set_aside?: { amount: number; currency: string | null; reported: string } | null
 }
+
+export type TierId = 'active' | 'thin' | 'quiet' | 'check'
+export interface Tier { id: TierId; label: string; note: string; count: number }
 
 export interface YearCount { year: number; joined: number; led: number }
 
@@ -81,6 +92,7 @@ export interface Lead {
   typical_round: { min: number; max: number; n: number } | null
   portfolio: { id: string; name: string; sources: Source[] }[]
   at_slush?: AtSlush | null
+  tier?: TierId
 }
 
 export interface FollowedRound extends RoundBrief { leads: string[]; sources: Source[]; relation?: Relation; via?: Via }
@@ -137,6 +149,8 @@ export interface Result {
   soft_yeses: SoftYes[]
   leads: Lead[]
   second_ring: Lead[]
+  /** How much Cala holds on each lead, strongest first. The list is grouped by it. */
+  tiers?: Tier[]
   rounds_walked: number
   ledger: Ledger
   notes: string[]
@@ -379,6 +393,6 @@ export const api = {
 }
 
 export function investorHref(ids: string[], name?: string | null): string {
-  const base = `/investor/${ids.slice(0, 4).join(',')}`
+  const base = `/investor/${ids.slice(0, 6).join(',')}`
   return name ? `${base}?name=${encodeURIComponent(name)}` : base
 }

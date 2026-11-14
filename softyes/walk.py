@@ -21,7 +21,7 @@ from . import graph, knowledge
 from .cala import BudgetExceeded, Cala, CalaError, Ledger
 
 FOLLOW_CAP = 20     # followed rounds walked per soft-yes investor (most recently reported first)
-PULSE_TOP = 12      # leads whose own record is read
+PULSE_TOP = 25      # leads whose own record is read
 VERIFY_TOP = 5      # leads whose most recent led rounds are opened to get the real date
 VERIFY_ROUNDS = 2
 RING2_TOP = 6       # co-investors checked for "sat beside you and leads elsewhere"
@@ -32,6 +32,19 @@ CAP_ROUNDS = 2       # most recent rounds opened per portfolio company
 CAP_WEIGHT = 0.6     # "led a round in a company you both back" counts less than "led a round you joined"
 SOFT_LED_ROUNDS = 3  # a soft yes's own most recent led rounds, opened for the follower profile
 DEEP_BELOW = 8       # fewer followed rounds than this in the graph: also ask Cala's knowledge search
+
+# How far a lead can be counted on, from what Cala holds about it. Leads are listed tier by tier.
+TIERS = [
+    {"id": "active", "label": "Leading now",
+     "note": "Three or more rounds on record in Cala and a round led in the last 24 months."},
+    {"id": "thin", "label": "Led lately, short record",
+     "note": "A round led in the last 24 months, but Cala holds fewer than three rounds for it."},
+    {"id": "quiet", "label": "No recent lead on record",
+     "note": "Led a round your investor joined, but Cala shows no round it led in the last 24 months."},
+    {"id": "check", "label": "Check the name first",
+     "note": "Cala may have tied this name to the wrong company."},
+]
+TIER_ORDER = {t["id"]: n for n, t in enumerate(TIERS)}
 
 Emit = Callable[[dict], Awaitable[None]]
 
@@ -59,6 +72,9 @@ def _months_ago(iso: str | None) -> float | None:
     return None if y is None else y * 12
 
 
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
 def _nearest(srcs: list[dict], when: str | None, limit: int) -> list[dict]:
     """Sources for a round, the page dated closest to the round first: that is the one that reports it.
     Cala also attaches older pages about the same company, which state other amounts."""
@@ -75,6 +91,31 @@ def _nearest(srcs: list[dict], when: str | None, limit: int) -> list[dict]:
                 return 10 ** 6
         out.sort(key=gap)
     return out[:limit]
+
+
+def _fact_sources(lead_srcs: list[dict], rd: dict, when: str | None, limit: int) -> list[dict]:
+    """Sources for one evidence row, each tagged with what it backs: "lead" (the page names this investor in
+    the round), "amount", "date". One page per fact comes first, then the pages dated closest to the round."""
+    merged: dict[str, dict] = {}
+    for x in lead_srcs:
+        merged.setdefault(x["url"], {**x, "backs": ["lead"]})
+    for x in rd["sources"]:
+        have = merged.get(x["url"])
+        if have:
+            have["backs"] += [b for b in x.get("backs", []) if b not in have["backs"]]
+        else:
+            merged[x["url"]] = {**x, "backs": list(x.get("backs", []))}
+    # among pages equally close to the round, the one that backs more of the row's facts comes first
+    ranked = _nearest(sorted(merged.values(), key=lambda x: -len(x["backs"])), when, 99)
+    out: list[dict] = []
+    for tag in ("lead", "amount", "date"):
+        if tag == "amount" and not rd.get("amount"):
+            continue
+        if not any(tag in x["backs"] for x in out):
+            hit = next((x for x in ranked if tag in x["backs"]), None)
+            if hit:
+                out.append(hit)
+    return (out + [x for x in ranked if x not in out])[:limit]
 
 
 def _round_brief(rd: dict) -> dict:
@@ -185,6 +226,13 @@ def _merge_deals(rounds: dict[str, dict], joined: dict, backed: dict) -> collect
     return folded
 
 
+def _month(iso: str | None) -> str:
+    try:
+        return f"{MONTHS[int(iso[5:7]) - 1]} {iso[:4]}"
+    except (TypeError, ValueError, IndexError):
+        return (iso or "an unknown date")[:4]
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
@@ -266,7 +314,11 @@ def _headline(softs: list[dict], leads: list[dict]) -> str:
     cap = any(d["relation"] == "cap_table" for e in leads for d in e["evidence"])
     where = (f"rounds that {names} joined" + (" or in companies they back" if cap else "")) if same else \
         f"rounds in companies that {names} back{'s' if len(softs) == 1 else ''}"
-    line = f"{_plural(len(leads), 'investor')} led {where}. Start with {top['name']}"
+    active = sum(1 for e in leads if e.get("tier") == "active")
+    line = f"{_plural(len(leads), 'investor')} led {where}"
+    if 0 < active < len(leads):
+        line += f", and {active} of them {'is' if active == 1 else 'are'} leading now"
+    line += f". Start with {top['name']}"
     n = len(top["evidence"])
     if top.get("led_recent"):
         line += (f": it led {n} of those rounds and {_plural(top['led_recent'], 'round')} "
@@ -478,14 +530,26 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                 e["ids"].append(i["id"])
             if len(i["name"]) and not i["name"].isupper() and e["name"].isupper():
                 e["name"] = i["name"]
-            e["rounds"][rid] = {"with": with_keys, "sources": i["sources"]}
+            e["rounds"][rid] = {"with": with_keys, "sources": i["sources"], "lead_reported": i.get("lead_reported")}
 
     def evidence(e: dict) -> list[dict]:
         out = []
         for rid, link in e["rounds"].items():
             rd = rounds[rid]
-            srcs = _nearest(link["sources"] + rd["sources"], rd["date"], 4)
-            out.append({**_round_brief(rd), "date_is_report": rd.get("date_is_report", False),
+            brief, is_report, caution = _round_brief(rd), rd.get("date_is_report", False), None
+            earlier = link.get("lead_reported")
+            if earlier:
+                # Every page naming this investor as lead is older than the date Cala gives the round: two events in one
+                # entity. The lead is dated by its own pages, and the amount stays only if a page from then states it.
+                caution = (f"Cala dates this round {_month(rd['date'])}, but the pages that name {e['name']} as its lead are "
+                           f"from {_month(earlier)} or before. Cala may hold two rounds as one, so the date shown is the report's.")
+                near = [x for x in rd["sources"] if "amount" in x.get("backs", []) and x.get("date")
+                        and abs((date.fromisoformat(x["date"][:10]) - date.fromisoformat(earlier)).days) <= 60]
+                brief = {**brief, "date": earlier} | ({} if near else {"amount": None, "currency": None})
+                is_report = True
+            srcs = _fact_sources(link["sources"], {**rd, "amount": brief["amount"]}, brief["date"], 4)
+            out.append({**brief, "date_is_report": is_report, "caution": caution,
+                        "amount_set_aside": rd.get("amount_set_aside"),
                         "with": [next(s["name"] for s in softs if s["key"] == k) for k in link["with"]],
                         "with_keys": link["with"],
                         # "round": the soft yes was in this round. "cap_table": it backs the company, round not on record.
@@ -524,7 +588,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             if invs:
                 e["_inv"] = _merge(invs)
                 e["pulse"] = _pulse(e["_inv"])
-                e["portfolio"] = e["_inv"]["portfolio"][:50]
+                e["portfolio"] = e["_inv"]["portfolio"][:150]
             return
         if not e["ids"]:
             # named in a report, not yet tied to a Cala entity: look the name up
@@ -545,7 +609,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         inv = _merge(invs)
         e["_inv"] = inv
         e["pulse"] = _pulse(inv)
-        e["portfolio"] = inv["portfolio"][:50]
+        e["portfolio"] = inv["portfolio"][:150]
         await emit({"t": "pulse", "key": e["key"], "name": e["name"], "rounds": e["pulse"]["rounds"],
                     "led": e["pulse"]["led"], **ledger.as_dict()})
 
@@ -619,6 +683,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         unsure = doubt(e)
         if unsure:
             e["score"] *= 0.3
+        on_record = (pulse or {}).get("rounds") or 0
+        tier = "check" if unsure else "active" if led_recent and on_record >= 3 else "thin" if led_recent else "quiet"
         per_soft = collections.defaultdict(list)
         for d in ev:
             for k, name in zip(d["with_keys"], d["with"]):
@@ -635,13 +701,13 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                    "led_at_stage": max(n, listed), "match": max(n, listed) > 0}
         amounts = sorted(d["amount"] for d in led_known if d["amount"] and d["currency"] in ("EUR", "USD"))
         return {"key": e["key"], "id": e["ids"][0] if e["ids"] else None, "ids": e["ids"], "name": e["name"], "kind": e["kind"],
-                "ring": e["ring"], "score": round(e["score"], 3), "evidence": ev, "ask": ask[0] if ask else None,
+                "ring": e["ring"], "score": round(e["score"], 3), "tier": tier, "evidence": ev, "ask": ask[0] if ask else None,
                 "asks": ask, "pulse": pulse, "led_recent": led_recent, "record": e.get("record"), "doubt": unsure,
                 "recent_leads": led_known[:4], "last_led": last_led, "fit": fit,
                 "typical_round": {"min": amounts[0], "max": amounts[-1], "n": len(amounts)} if amounts else None,
                 "portfolio": e.get("portfolio", [])}
 
-    first = sorted((finish(e) for e in leads.values()), key=lambda e: e["score"], reverse=True)
+    first = sorted((finish(e) for e in leads.values()), key=lambda e: (TIER_ORDER[e["tier"]], -e["score"]))
     for n, e in enumerate(first, 1):
         e["rank"] = n
     second_out = sorted((finish(c) for c in second), key=lambda e: e["score"], reverse=True)
@@ -687,6 +753,10 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                   "stage_name": graph.STAGE_NAMES.get(want_stage or "", None), "company": inputs.get("company")},
         "headline": _headline(soft_out, first),
         "soft_yeses": soft_out, "leads": first, "second_ring": second_out,
+        "tiers": [{**t, "count": sum(1 for e in first if e["tier"] == t["id"])} for t in TIERS
+                  if any(e["tier"] == t["id"] for e in first)],
+        # facts Cala attaches to a round from pages older than the round: shown with a caution, or left out
+        "set_aside": sum(bool(d.get("caution")) + bool(d.get("amount_set_aside")) for e in first + second_out for d in e["evidence"]),
         "rounds_walked": len(rounds), "duplicates_folded": folded["_all"],
         "ledger": ledger.as_dict() | {"facts": facts, "sources": len(urls), "seconds": round(time.time() - t0, 1),
                                       "llm_facts": 0},

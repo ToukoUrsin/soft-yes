@@ -10,12 +10,14 @@ import asyncio
 import os
 from typing import Awaitable, Callable
 
-from . import extras, graph
+from . import extras, graph, walk
 
 PUBLIC_URL = os.environ.get("SOFTYES_PUBLIC_URL", "https://soft-yes.fly.dev").rstrip("/")
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 STAGES = ["PRE_SEED", "SEED", "SERIES_A", "SERIES_B", "SERIES_C"]
 FIRST_ANSWER_S = 45   # an assistant should not wait longer than this; the rest is on the run's page
+
+TIER_LABEL = {t["id"]: t["label"].lower() for t in walk.TIERS}
 
 TOOLS = [
     {"name": "find_lead",
@@ -64,6 +66,9 @@ def _deal(d: dict) -> str:
 
 def lead_lines(e: dict, n: int | None = None) -> list[str]:
     head = f"{n}. {e['name']}" if n else e["name"]
+    label = TIER_LABEL.get(e.get("tier")) if n else None
+    if label:
+        head += f" [{label}]"
     if e.get("at_slush"):
         head += " (registered for Slush)"
     out = [head, "   " + "; ".join(w["text"] for w in e.get("why", []))]
@@ -74,6 +79,9 @@ def lead_lines(e: dict, n: int | None = None) -> list[str]:
         out.append(f"   Ask {ask['name']} for the intro. Round they share: {_deal(ask['last'])}{_src(ask['last'].get('sources') or [])}")
     for d in e["evidence"][1:3]:
         out.append(f"   Also: {_deal(d)}, with {' and '.join(d['with'])}{_src(d.get('sources') or [])}")
+    for d in e["evidence"][:3]:
+        if d.get("caution"):
+            out.append("   Caution: " + d["caution"])
     return out
 
 
@@ -109,7 +117,8 @@ def result_data(r: dict) -> dict:
     return {"run_id": r["run_id"], "url": f"{PUBLIC_URL}/r/{r['run_id']}", "headline": r["headline"],
             "soft_yeses": [{"name": s["name"], "verdict": s["verdict"], "insight": s["insight"], "rounds": s.get("rounds_in_cala"),
                             "led": s.get("led")} for s in r["soft_yeses"]],
-            "leads": [{"rank": e["rank"], "name": e["name"], "why": [w["text"] for w in e["why"]],
+            "leads": [{"rank": e["rank"], "name": e["name"], "confidence": TIER_LABEL.get(e.get("tier")),
+                       "why": [w["text"] for w in e["why"]],
                        "ask": (e.get("ask") or {}).get("name"), "led_recent": e.get("led_recent"),
                        "at_slush": bool(e.get("at_slush")), "caution": (e.get("doubt") or {}).get("text"),
                        "shared_rounds": [{"company": (d.get("issuer") or {}).get("name"), "stage": d.get("stage_name"),

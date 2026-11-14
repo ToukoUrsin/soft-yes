@@ -348,6 +348,29 @@ async def scrape(url: str) -> dict:
 ABOUT = re.compile(r"about|approach|thesis|criteria|strategy|what-we-do|how-we|philosophy|focus|invest(?!ors-login)|manifesto|faq", re.I)
 
 
+async def best_profile(cala: Cala, lead: dict) -> dict | None:
+    """Cala often holds one investor as several entities (a fund vehicle, a holding company, the firm).
+    The one that carries the firm's own website is the firm; the others only fill gaps."""
+    best = None
+    for uid in list(dict.fromkeys([lead.get("id"), *(lead.get("ids") or [])]))[:4]:
+        if not uid:
+            continue
+        try:
+            prof = await graph.profile(cala, uid)
+        except BudgetExceeded:
+            prof = await graph.profile(cala, uid, cache_only=True)
+        except CalaError:
+            prof = None
+        if not prof:
+            continue
+        if prof.get("website"):
+            if best:   # keep what the earlier entities knew that this one does not
+                prof = {**prof, "people": prof["people"] or best["people"], "description": prof["description"] or best["description"]}
+            return prof
+        best = best or prof
+    return best
+
+
 async def says(cala: Cala, lead: dict) -> dict:
     """What the fund says about itself on its own site, quoted verbatim, beside what Cala shows it did."""
     uid = lead.get("id")
@@ -359,12 +382,7 @@ async def says(cala: Cala, lead: dict) -> dict:
            "last_led": lead.get("last_led")}
     if hit:
         return {**hit, "did": did}
-    try:
-        prof = await graph.profile(cala, uid) if uid else None
-    except BudgetExceeded:
-        prof = await graph.profile(cala, uid, cache_only=True)
-    except CalaError:
-        prof = None
+    prof = await best_profile(cala, lead)
     website = (prof or {}).get("website")
     base = {"lead": lead["name"], "website": website, "website_sources": (prof or {}).get("website_sources", []),
             "hq": (prof or {}).get("hq"), "people": ((prof or {}).get("people") or [])[:8], "quotes": [], "pages": []}
