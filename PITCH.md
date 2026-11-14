@@ -2,7 +2,7 @@
 
 About 270 spoken words. That is 1:50 of talking and leaves over a minute for the two cards to draw. The mic is cut at 3:00.
 
-Laptop on https://claude.ai/new in Chrome, Soft Yes on. Paste both messages once before you go up, each in a new chat, so they answer in seconds. They are in `CLAUDE_DEMO.md`: keep that tab open and go up with the first message already copied. Read the numbers off the card when you say them.
+Laptop on https://claude.ai/new in Chrome, Soft Yes on. Paste both messages once before you go up, each in a new chat, so they answer in seconds. They are in `CLAUDE_DEMO.md`: go up with the first message copied and the second one pasted, unsent, in a second Claude tab. Read the numbers off the card when you say them.
 
 **0:00** Every founder here asks the same thing first. Which investors do I talk to? Most of us ask Claude, and Claude guesses.
 
@@ -10,18 +10,18 @@ Laptop on https://claude.ai/new in Chrome, Soft Yes on. Paste both messages once
 Soft Yes is in Claude and it doesn't guess. It asks Cala's graph for companies like ours. It reads their rounds and who invested. Then it reads Cala's record of each investor.
 
 **0:35** *Point at the first investor, then at Accel.*
-Ovni Capital led a pre-seed like ours this month. The sentence under it is from the page Cala cites. And Accel sat in three rounds with Lightspeed, one of Cala's own investors. That's a way in. 294 facts from Cala. Zero from a language model.
+Ovni Capital led a pre-seed like ours this month. The sentence under it is from Cala's source. And Accel sat in three rounds with Lightspeed, one of Cala's own investors. That's a way in. 294 facts from Cala. Zero from a language model.
 
-**1:00** *New chat. Copy the second message from the CLAUDE_DEMO.md tab, paste.*
+**1:00** *Switch to a second tab with the second message already pasted. Press Enter.*
 Later an investor says "we're in if you find a lead". That's a soft yes. Let's say Tesi and Innovestor told us that. Soft Yes finds who led the rounds they joined. Emergence Capital led Verda's round with Tesi in it. So Tesi can introduce us.
 
 **1:25** *Point at "2 do not" under the graph.*
-Now the part we didn't expect. Cala says Lifeline led two more rounds with Tesi. We opened the page Cala cites for each. One is Measur. Its own blog says someone else led. Tell Tesi the wrong name and you've lost them. They were in that round. So a lead only counts when the page says it.
+Now the part we didn't expect. Cala says Lifeline also led two rounds with Tesi. We opened Cala's source for each. One is Measur. Its own blog says someone else led. Tell Tesi the wrong name and you've lost them. They were in that round. So a lead only counts when the page says it.
 
 **1:50** *Click "Draft the ask to Tesi". On stage don't fill in the company, just point.*
 One click writes the ask to Tesi. Every fact in it is listed right under it.
 
-**2:05** We've checked over 850 of Cala's "led by" claims this way. The page agrees on more than 600 and disagrees on 19. Cala team: those 19 are in one file, each with its sentence. It's yours.
+**2:05** Cala says who led a round. We've checked over 850 of those this way. The page agrees on more than 600 and disagrees on 19. Cala team: those 19 are in one file, each with its sentence. It's yours.
 
 **2:20** It's live at soft-yes.fly.dev. Add it to your Claude and ask about your own round.
 
