@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import collections
 import json
 import os
 import time
@@ -14,7 +15,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from . import cala as cala_mod
-from . import extras, graph, mcp as mcp_mod, walk as walk_mod
+from . import extras, graph, mcp as mcp_mod, pagecheck, walk as walk_mod
 from .cala import BASE, CREDIT_CAP, BudgetExceeded, CalaError, Ledger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,8 +51,11 @@ def _index_add(uid: str, name: str, etype: str | None, description: str | None =
                                "description": None, "rounds": 0})
     if uid not in e["ids"]:
         e["ids"].append(uid)
-    if description and not e["description"]:
-        e["description"] = description
+    # Several Cala entities can share one name (a Swedish shell company and the Helsinki fund). The description shown
+    # is the one that reads like an investor, and an organisation's before a company's.
+    fit = (2 if description and graph.INVESTOR_WORDS.search(description) else 0) + (1 if etype == "Organization" else 0)
+    if description and (not e["description"] or fit > e.get("_fit", 0)):
+        e["description"], e["_fit"] = description, fit
     if e["name"].isupper() and not name.isupper():
         e["name"] = name
     e["rounds"] += rounds
@@ -71,14 +75,33 @@ def _index_response(url: str, body, resp: dict) -> None:
         _index_add(resp["id"], resp["name"], resp.get("entity_type"), resp.get("description"))
 
 
+def _index_walked(result: dict) -> None:
+    """Remember how many rounds Cala holds for each investor a walk read, so the picker shows the count the result shows."""
+    for s in result.get("soft_yeses", []):
+        e = INDEX.get(graph.norm(s["name"]))
+        if e and s.get("rounds_in_cala"):
+            e["walked"] = s["rounds_in_cala"]
+    for x in result.get("leads", []) + result.get("second_ring", []):
+        e = INDEX.get(x["key"])
+        if e and (x.get("pulse") or {}).get("rounds") and not e.get("walked"):
+            e["walked"] = x["pulse"]["rounds"]
+
+
 def build_index() -> None:
     INDEX.clear()
     c = cala_mod.get()
     with c.dblock:
         rows = c.db.execute("select url, body, response from calls").fetchall()
+        runs = c.db.execute("select result from runs order by created").fetchall() \
+            if c.db.execute("select 1 from sqlite_master where name='runs'").fetchone() else []
     for url, body, resp in rows:
         try:
             _index_response(url, json.loads(body) if body else None, json.loads(resp))
+        except (ValueError, KeyError, TypeError):
+            continue
+    for (result,) in runs:
+        try:
+            _index_walked(json.loads(result))
         except (ValueError, KeyError, TypeError):
             continue
 
@@ -176,8 +199,10 @@ def _families(hits: list[dict], limit: int, q: str = "") -> list[dict]:
         done.update(m["key"] for m in members)
         head = min(members, key=lambda m: (-m["rounds"], not graph.INVESTOR_WORDS.search(m["name"]), len(m["name"])))
         ids = [i for m in members for i in m["ids"]][:6]
+        described = sorted((m for m in members if m.get("description")), key=lambda m: (-m.get("_fit", 0), -m["rounds"]))
         out.append({**head, "ids": ids, "rounds": sum(m["rounds"] for m in members),
-                    "description": head.get("description") or next((m["description"] for m in members if m.get("description")), None),
+                    "walked": max((m.get("walked") or 0 for m in members), default=0),
+                    "description": described[0]["description"] if described else None,
                     "entities": [{"name": m["name"], "ids": m["ids"]} for m in members][:6]})
     nq = graph.norm(q)
     # the name as typed first, then the firm Cala knows best; a marketing agency called Seaya goes below Seaya Ventures
@@ -187,21 +212,40 @@ def _families(hits: list[dict], limit: int, q: str = "") -> list[dict]:
 
 
 NICKNAMES = {"a16z": "Andreessen Horowitz", "yc": "Y Combinator", "usv": "Union Square Ventures",
-             "nea": "New Enterprise Associates", "kp": "Kleiner Perkins"}
+             "nea": "New Enterprise Associates", "kp": "Kleiner Perkins", "gc": "General Catalyst", "lsvp": "Lightspeed",
+             # names an investor used to carry, or carries in full
+             "finnishindustryinvestment": "Tesi", "suomenteollisuussijoitus": "Tesi", "teollisuussijoitus": "Tesi",
+             "europeaninnovationcouncil": "EIC Fund", "europeaninnovationcouncilfund": "EIC Fund",
+             "andreessen": "Andreessen Horowitz", "ycombinator": "Y Combinator", "kleiner": "Kleiner Perkins",
+             "bpi": "Bpifrance", "banquepubliquedinvestissement": "Bpifrance", "eqt": "EQT Ventures"}
+
+
+def _nickname(q: str) -> str | None:
+    nq = graph.norm(q)
+    if nq in NICKNAMES:
+        return NICKNAMES[nq]
+    return next((v for k, v in NICKNAMES.items() if len(nq) >= 7 and k.startswith(nq)), None)
 
 
 def _close(q: str, limit: int = 3) -> list[dict]:
     """A misspelt name ("Sequioa", "Andreesen Horowitz"): investors Cala has rounds for whose name is nearly the same."""
-    want = graph.root(q)[0] or graph.norm(q)
-    if len(want) < 5:
-        return []
+    full, first = graph.norm(q), graph.norm(q.split()[0]) if q.split() else ""
+    want = graph.root(q)[0] or full
     roots: dict[str, dict] = {}
     for e in INDEX.values():
         if e["rounds"] > 0:
-            r = graph.root(e["name"])[0] or e["key"]
-            if r not in roots or roots[r]["rounds"] < e["rounds"]:
-                roots[r] = e
-    return [roots[r] for r in difflib.get_close_matches(want, list(roots), n=limit, cutoff=0.82) if r != want]
+            for r in {graph.root(e["name"])[0] or e["key"], e["key"]}:
+                if r not in roots or roots[r]["rounds"] < e["rounds"]:
+                    roots[r] = e
+    out: list[dict] = []
+    # the whole name ("Acel Partnrs" ~ "Accel Partners"), its root, then its first word against well-known firms only
+    for w, floor, cutoff in ((want, 1, 0.82), (full, 1, 0.82), (first, 3, 0.86)):
+        if len(w) < (5 if w != first else 4):
+            continue
+        for r in difflib.get_close_matches(w, list(roots), n=limit, cutoff=cutoff):
+            if r != w and roots[r]["rounds"] >= floor and roots[r] not in out:
+                out.append(roots[r])
+    return out[:limit]
 
 
 def _related(q: str, name: str) -> bool:
@@ -215,7 +259,7 @@ async def suggest(q: str = "", limit: int = 7):
     q = q.strip()[:60]
     if len(q) < 2:
         return {"items": [], "source": "none"}
-    nick = NICKNAMES.get(graph.norm(q))
+    nick = _nickname(q)
     local = _local_hits(q, 20)
     source = "index"
     if len(q) >= 3 and not nick and not any(e["rounds"] for e in local):  # nothing with a track record locally: ask Cala
@@ -241,7 +285,15 @@ async def suggest(q: str = "", limit: int = 7):
             continue
         seen.add(shown)
         items.append(dict(e))
-    return {"items": [{**e, "known_rounds": e["rounds"]} for e in items[:limit]], "source": source}
+    nq, out = graph.norm(q), []
+    for n, e in enumerate(items[:limit]):
+        # `sure`: the row is what was typed (its name starts with it, or it is a known other name), with a record in Cala.
+        # Enter takes the top row only then; a near miss or a namesake has to be chosen.
+        typed = e["key"].startswith(nq) or (graph.root(e["name"])[0] or "").startswith(nq) or \
+            all(any(w.startswith(x) for w in e["name"].lower().split()) for x in q.lower().split())
+        sure = n == 0 and e["rounds"] > 0 and ((bool(nick) and not e.get("did_you_mean")) or (typed and not e.get("did_you_mean")))
+        out.append({**{k: v for k, v in e.items() if not k.startswith("_")}, "known_rounds": e.get("walked") or e["rounds"], "sure": sure})
+    return {"items": out, "source": source}
 
 
 @app.get("/api/company")
@@ -323,13 +375,29 @@ async def _run(inputs: dict, emit) -> dict:
         result = await walk_mod.walk(cala_mod.get(), inputs, quiet, aliases=aliases, deep=deep)
     result["credits"] = _credits()
     _save_run(inputs, result)
+    if result["page_check"]["late"]:
+        # Some cited pages were slow. They are still being read: walk once more when they are in, and store that.
+        async def settle() -> None:
+            await pagecheck.settle(90)
+
+            async def silent(event: dict) -> None:
+                return None
+
+            again = await walk_mod.walk(cala_mod.get(), inputs, silent, aliases=aliases, deep=deep or None)
+            again["credits"] = _credits()
+            _save_run(inputs, again)
+
+        late = asyncio.create_task(settle())
+        BACKGROUND.add(late)
+        late.add_done_callback(BACKGROUND.discard)
     _annotate(result)
     for s in result["soft_yeses"]:
         for uid in s["ids"]:
             _index_add(uid, s["name"], None, s.get("description"), 0)
     for e in result["leads"] + result["second_ring"]:
         for uid in e["ids"]:
-            _index_add(uid, e["name"], "Person" if e["kind"] == "person" else None, None, len(e["evidence"]))
+            _index_add(uid, e["name"], "Person" if e["kind"] == "person" else None, None, 0)
+    _index_walked(result)
     return result
 
 
@@ -476,7 +544,8 @@ def _load_annotated(run_id: str) -> dict | None:
     return _annotate(result) if result else None
 
 
-MCP = mcp_mod.Server(suggest=lambda name: suggest(name), run=lambda inputs, emit: _run(inputs, emit), load=_load_annotated)
+MCP = mcp_mod.Server(suggest=lambda name: suggest(name), run=lambda inputs, emit: _run(inputs, emit), load=_load_annotated,
+                     check=lambda name: check(q=name))
 
 
 @app.post("/mcp")
@@ -497,6 +566,86 @@ async def mcp(request: Request):
 async def mcp_get():
     return JSONResponse({"detail": "This is an MCP server. Add this address to your assistant as a connector, or POST JSON-RPC."},
                         status_code=405, headers={"Allow": "POST"})
+
+
+@app.get("/api/audit")
+async def audit():
+    """Everything the page check has found so far, across every stored walk: how many of Cala's lead flags the cited
+    pages confirm word for word, and each place a page disagrees with Cala (lead, amount or stage), with the sentence."""
+    db = cala_mod.get().db
+    claims: dict[tuple, str] = {}
+    found: dict[tuple, dict] = {}
+    runs = 0
+    stored = [(raw, True) for (raw,) in db.execute("select result from runs order by created")]
+    if _has_blobs(db):   # companies checked on their own count too
+        stored += [(raw, False) for (raw,) in db.execute("select value from blobs where key like 'check:%' order by created")]
+    for raw, is_walk in stored:
+        pc = (json.loads(raw).get("page_check") or {})
+        if not pc.get("claims"):
+            continue
+        runs += is_walk
+        for rid, key, status in pc["claims"]:
+            claims[(rid, key)] = status
+        for f in (pc.get("findings") or []) + (pc.get("confirmed_rows") or []):
+            found[(f["kind"], f["round"], graph.norm(f["cala"]) if f["kind"] in ("lead", "confirmed") else "")] = f
+    by = collections.Counter(claims.values())
+    pages = db.execute("select count(*) from blobs where key like 'pagetext2:%' and value like '%\"status\": \"read\"%'").fetchone()[0] \
+        if _has_blobs(db) else 0
+    rows = sorted(found.values(), key=lambda f: f.get("date") or "", reverse=True)
+    return {"walks": runs, "rounds": len({rid for rid, _ in claims}), "pages": pages, "claims": len(claims),
+            "confirmed": by["lead"], "corrected": by["follower"], "unstated": by["unstated"] + by["absent"] + by["other"],
+            "unread": by["unread"] + by["off"],
+            "leads": [f for f in rows if f["kind"] == "lead" and claims.get((f["round"], graph.norm(f["cala"]))) == "follower"][:150],
+            "confirmed_rows": [f for f in rows if f["kind"] == "confirmed"
+                               and claims.get((f["round"], graph.norm(f["cala"]))) == "lead"],
+            "amounts": [f for f in rows if f["kind"] == "amount"][:80],
+            "stages": [f for f in rows if f["kind"] == "stage"][:80]}
+
+
+@app.get("/api/check")
+async def check(q: str = "", id: str = ""):
+    """The page check for any company: its rounds in Cala, who Cala says led each, and what the cited pages say."""
+    c = cala_mod.get()
+    q, matches = q.strip()[:80], []
+    name = ""
+    try:
+        if not id:
+            if len(q) < 2:
+                raise HTTPException(400, "Name a company.")
+            try:
+                found = await graph.search(c, q, limit=8)
+            except BudgetExceeded:
+                found = await graph.search(c, q, limit=8, cache_only=True)
+            nq = graph.norm(q)
+            found = [f for f in found if f["type"] != "Person"]
+            # the name as typed first, then a company before an organisation
+            found.sort(key=lambda f: (graph.norm(f["name"]) != nq, not graph.norm(f["name"]).startswith(nq), f["type"] != "Company"))
+            if not found:
+                return {"company": None, "matches": [], "rounds": [], "q": q}
+            matches = [{"id": f["id"], "name": f["name"], "description": graph.fix_text(f.get("description"))} for f in found[:5]]
+            out = None
+            for f in found[:4]:   # Cala can hold a company twice: take the entity that has the rounds
+                got = await walk_mod.check_company(c, f["id"], f["name"])
+                out = out or got
+                if got["rounds"]:
+                    out = got
+                    break
+            id = out["company"]["id"]
+        else:
+            prof = await graph.company(c, id, cache_only=False)
+            name = (prof or {}).get("name") or q or "This company"
+            out = await walk_mod.check_company(c, id, name)
+    except CalaError as exc:
+        raise HTTPException(503 if isinstance(exc, BudgetExceeded) else 502, str(exc))
+    out["company"]["description"] = next((m["description"] for m in matches if m["id"] == id), None)
+    out["matches"], out["q"] = matches, q
+    if out["page_check"]["claims"]:
+        extras.blob_put("check:" + id, {"page_check": out["page_check"]})
+    return out
+
+
+def _has_blobs(db) -> bool:
+    return bool(db.execute("select 1 from sqlite_master where name = 'blobs'").fetchone())
 
 
 @app.get("/api/health")

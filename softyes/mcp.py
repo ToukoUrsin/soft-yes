@@ -1,7 +1,7 @@
 """Soft Yes as an MCP server, so a founder's own assistant can do the walk.
 
 One endpoint, POST /mcp, speaking JSON-RPC as MCP's streamable HTTP transport allows: a plain JSON reply
-per request, no session. Three read-only tools. Everything they return is the same sourced Cala data the
+per request, no session. Four read-only tools. Everything they return is the same sourced Cala data the
 web app shows; the text is assembled in code, never by a language model.
 """
 from __future__ import annotations
@@ -50,7 +50,20 @@ TOOLS = [
          "one_liner": {"type": "string", "description": "What the company does, one sentence"},
          "raising": {"type": "string", "description": "The round being raised, e.g. \"€4M Series A\""}}},
      "annotations": {"readOnlyHint": True, "openWorldHint": True}},
+    {"name": "who_led",
+     "title": "Who led this company's rounds, by the page",
+     "description": "For one company: each funding round Cala holds, who Cala says led it, and what the page Cala cites for "
+                    "that round says, quoted word for word. A lead the page credits to someone else is marked corrected. "
+                    "Use it to check a \"led by\" claim before repeating it.",
+     "inputSchema": {"type": "object", "required": ["company"], "properties": {
+         "company": {"type": "string", "description": "The company's name, e.g. \"Verda\""}}},
+     "annotations": {"readOnlyHint": True, "openWorldHint": True}},
 ]
+
+SAID = {"lead": "the page says it led", "report": "known from a report, no round page", "follower": "the page names another lead",
+        "unstated": "the page names it but does not say it led", "other": "the page says it led another round of this company",
+        "absent": "the page does not name it", "off": "the cited page is about something else",
+        "unread": "the cited page could not be read"}
 
 
 def _src(sources: list[dict]) -> str:
@@ -132,8 +145,45 @@ class Server:
     """`suggest(name)` resolves a name to Cala entities, `run(inputs, emit)` walks, `load(run_id)` reads a stored run."""
 
     def __init__(self, suggest: Callable[[str], Awaitable[dict]], run: Callable[[dict, Callable], Awaitable[dict]],
-                 load: Callable[[str], dict | None]):
-        self.suggest, self.run, self.load = suggest, run, load
+                 load: Callable[[str], dict | None], check: Callable[[str], Awaitable[dict]] | None = None):
+        self.suggest, self.run, self.load, self.check = suggest, run, load, check
+
+    async def who_led(self, args: dict) -> dict:
+        name = str(args.get("company") or "").strip()
+        if len(name) < 2 or not self.check:
+            return _error("Name a company, e.g. {\"company\": \"Verda\"}.")
+        d = await self.check(name)
+        if not d.get("company"):
+            return _error(f"Cala does not know a company called {name}.")
+        co = d["company"]["name"]
+        if not d["rounds"]:
+            return {"content": [{"type": "text", "text": f"Cala holds no funding rounds for {co}."}], "isError": False,
+                    "structuredContent": {"company": co, "rounds": []}}
+        out, rows = [f"# {co}: who led, by the page Cala cites", ""], []
+        for r in d["rounds"]:
+            head = " ".join(x for x in (r["stage_name"], (r.get("date") or "")[:7]) if x)
+            out.append(f"## {head}")
+            if not r["investors"]:
+                out.append("Cala names no lead for this round.")
+            for i in r["investors"]:
+                ck = i.get("check") or {}
+                line = f"- {i['name']}: " + ("Cala says it led; " if i["cala_lead"] else "Cala does not flag it; ") + \
+                    SAID.get(ck.get("status"), "not checked")
+                if ck.get("led_by"):
+                    line += f" ({', '.join(ck['led_by'])} led)"
+                if ck.get("quote"):
+                    line += f'. "{ck["quote"]}" ({ck.get("url")})'
+                out.append(line)
+                rows.append({"round": head, "investor": i["name"], "cala_says_lead": i["cala_lead"], "page": ck.get("status"),
+                             "page_names_lead": ck.get("led_by"), "quote": ck.get("quote"), "url": ck.get("url")})
+            out.append("")
+        pc = d["page_check"]
+        out.append(f"{pc['pages']} page{'s' if pc['pages'] != 1 else ''} read: {pc['confirmed']} lead "
+                   f"claim{'s' if pc['confirmed'] != 1 else ''} confirmed word for word, {pc['corrected']} corrected. "
+                   f"Every checked claim: {PUBLIC_URL}/audit")
+        return {"content": [{"type": "text", "text": "\n".join(out)}],
+                "structuredContent": {"company": co, "claims": rows, "pages_read": pc["pages"], "confirmed": pc["confirmed"],
+                                      "corrected": pc["corrected"]}, "isError": False}
 
     async def _resolve(self, names: list[str]) -> tuple[list[dict], list[str]]:
         softs, unknown = [], []
@@ -237,8 +287,8 @@ class Server:
         if method == "tools/list":
             return ok({"tools": TOOLS})
         if method == "tools/call":
-            fn = {"find_lead": self.find_lead, "check_investor": self.check_investor, "draft_intro": self.draft_intro} \
-                .get(params.get("name"))
+            fn = {"find_lead": self.find_lead, "check_investor": self.check_investor, "draft_intro": self.draft_intro,
+                  "who_led": self.who_led}.get(params.get("name"))
             if not fn:
                 return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"Unknown tool: {params.get('name')}"}}
             try:

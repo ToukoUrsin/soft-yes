@@ -36,6 +36,17 @@ def http() -> httpx.AsyncClient:
     return _http
 
 
+_gemini_http: httpx.AsyncClient | None = None
+
+
+def gemini_http() -> httpx.AsyncClient:
+    """Gemini over IPv4 only: from some hosts (Fly, Stockholm) its API refuses the IPv6 address as an unsupported location."""
+    global _gemini_http
+    if _gemini_http is None:
+        _gemini_http = httpx.AsyncClient(timeout=40, transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=1))
+    return _gemini_http
+
+
 def gemini_ready() -> bool:
     return bool(os.environ.get("JUNCTION_GEMINI_API_KEY"))
 
@@ -68,14 +79,15 @@ async def gemini_json(system: str, user: str, temperature: float = 0.4):
                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     for attempt in range(2):
         try:
-            r = await http().post(GEMINI_URL, json=payload, timeout=25,
-                                  headers={"Authorization": f"Bearer {os.environ['JUNCTION_GEMINI_API_KEY']}"})
+            r = await gemini_http().post(GEMINI_URL, json=payload, timeout=25,
+                                         headers={"Authorization": f"Bearer {os.environ['JUNCTION_GEMINI_API_KEY']}"})
             if r.status_code == 200:
                 text = r.json()["choices"][0]["message"]["content"]
                 text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
                 return json.loads(text)
-        except (httpx.HTTPError, ValueError, KeyError, IndexError):
-            pass
+            print(f"gemini: HTTP {r.status_code} {r.text[:200]!r}", flush=True)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+            print(f"gemini: {exc!r}"[:300], flush=True)
         await asyncio.sleep(1 + attempt)
     return None
 
@@ -147,17 +159,30 @@ seven eight nine ten jan feb mar apr may jun jul aug sep oct nov dec january feb
 september october november december monday tuesday wednesday thursday friday based building built backed backing committed commit commits come coming early ready interested interest currently plan planning plans share shared sharing sent send reach reaching writing write wrote ask asking asked able tell told want wanted wants wonder wondering hope hoping love appreciate appreciated grateful forward forwardable lines line blurb below above attached closing close closed term sheet terms subject re fwd hear heard explore discuss discussion conversation worked work working alongside previously earlier later tomorrow yesterday history introduction introductions request""".split())
 
 
+def _status(d: dict) -> str | None:
+    return (d.get("check") or {}).get("status")
+
+
 def fact_sheet(result: dict, lead: dict, founder: dict) -> list[str]:
+    return cala_facts(result, lead) + own_words(lead, founder)
+
+
+def cala_facts(result: dict, lead: dict) -> list[str]:
+    """What a draft may say about the lead: rounds the cited page confirms it led, before anything else."""
     name = lead["name"]
     facts = []
-    for d in lead["evidence"][:4]:
+    ev = lead["evidence"]
+    rows = [d for d in ev if _status(d) in ("lead", "report")] or \
+        [d for d in ev if _status(d) not in ("unstated", "other", "absent", "off")] or ev
+    for d in rows[:4]:
         who = " and ".join(d["with"])
         verb = "led" if lead["ring"] == 1 else "took part in"
         facts.append(f"{name} {verb} {deal_phrase(d)}. {who} took part in that round.")
     if lead["ring"] == 1:
         for a in lead.get("asks") or []:
-            if a["deals"] > 1:
-                facts.append(f"{name} led {a['deals']} rounds that {a['name']} took part in.")
+            n = sum(1 for d in rows if a["name"] in d["with"])
+            if n > 1:
+                facts.append(f"{name} led {n} rounds that {a['name']} took part in.")
     p = lead.get("pulse")
     if p and p["rounds"]:
         facts.append(f"Cala has {p['rounds']} funding rounds for {name}; it led {p['led']} of them"
@@ -167,14 +192,38 @@ def fact_sheet(result: dict, lead: dict, founder: dict) -> list[str]:
     for s in result["soft_yeses"]:
         if any(s["name"] in d["with"] for d in lead["evidence"]) and s.get("rounds_in_cala"):
             facts.append(f"Cala lists {s['rounds_in_cala']} rounds for {s['name']}: it led {s['led']} and followed in {s['followed']}.")
+    return facts
+
+
+def own_words(lead: dict, founder: dict) -> list[str]:
+    """What the founder told us. A draft may use it; nothing checks it."""
+    facts = []
     softs = sorted({w for d in lead["evidence"] for w in d["with"]})
     if softs:
-        facts.append(f"{' and '.join(softs)} told the founder: we will invest once a lead investor is in. (The founder's own statement.)")
+        facts.append(f"{' and '.join(softs)} told the founder: we will invest once a lead investor is in.")
     if founder.get("company"):
-        facts.append(f"The founder's company is {founder['company']}." + (f" {founder['one_liner']}" if founder.get("one_liner") else ""))
+        facts.append(f"The founder's company is {founder['company']}." + (f" {_stop(founder['one_liner'])}" if founder.get("one_liner") else ""))
     if founder.get("raising"):
         facts.append(f"The founder is raising: {founder['raising']}.")
     return facts
+
+
+def _stop(s: str) -> str:
+    s = s.strip()
+    return s if not s or s[-1] in ".!?" else s + "."
+
+
+def _articles(body: str) -> str:
+    """'a EUR 8M round' -> 'an EUR 8M round', 'a 8M' -> 'an 8M'."""
+    return re.sub(r"\b([Aa])\s+(?=(?:EUR\b|€\s?(?:8|11|18)(?![\d])|(?:8|11|18)(?:[.,]\d+)?\s?[MKBk]\b))", r"\1n ", body)
+
+
+def _finish(kind: str, subject: str, body: str, result: dict, lead: dict, founder: dict, **more) -> dict:
+    """One shape for every draft. `placeholders`: what the founder still has to fill in before it can be sent."""
+    body = _articles(body)
+    return {"kind": kind, "subject": subject, "body": body, "facts": cala_facts(result, lead), "yours": own_words(lead, founder),
+            "placeholders": list(dict.fromkeys(re.findall(r"\[[^\]]+\]", subject + " " + body))),
+            "chars": len(body), "checked": True, **more}
 
 
 def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
@@ -186,7 +235,7 @@ def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
     company = founder.get("company") or "[your company]"
     raising = re.sub(r"^(an?|our|the)\s+", "", founder.get("raising") or "", flags=re.I) or "[round]"
     a_raising = ("an " if raising[:1].lower() in "aeiou8" else "a ") + raising if raising != "[round]" else raising
-    one = founder.get("one_liner") or "[one line on what you do]"
+    one = _stop(founder.get("one_liner") or "") or "[one line on what you do]"
     led_verb = "led" if lead["ring"] == 1 else "joined"
     if kind == "intro_ask":
         subject = f"Intro to {name}?"
@@ -222,6 +271,7 @@ def verify_draft(text: str, facts: list[str], founder: dict) -> list[str]:
         if m.lower().replace(" ", "").rstrip(".,") not in tight:
             bad.append(m)
     text = re.sub(money, " ", text)
+    text = re.sub(r"\b25[- ]minutes?\b", " ", text)   # the length of the meeting we ask for, not a fact
     for num in re.findall(r"\d[\d.,]*", text):
         n = num.strip(".,")
         if n and n not in allowed and n.replace(",", "") not in allowed.replace(",", ""):
@@ -244,8 +294,8 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
     facts = fact_sheet(result, lead, founder)
     fallback = template(result, lead, kind, founder)
     if not llm or not gemini_ready():
-        return {"kind": kind, **fallback, "facts": facts, "model": None, "checked": True, "fallback": True,
-                "chars": len(fallback["body"]), "note": "Built from the facts below without a language model."}
+        return _finish(kind, fallback["subject"], fallback["body"], result, lead, founder, model=None, fallback=True,
+                       note="Built from the facts below without a language model.")
     ask = lead.get("ask") or {}
     soft = ask.get("name") or ""
     brief = {
@@ -276,6 +326,7 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
               'Return JSON: {"subject": "...", "body": "..."}. For a Slush note the subject is empty.')
     user = "FACTS:\n" + "\n".join(f"- {f}" for f in facts) + f"\n\nWRITE: {brief}"
     unsupported: list[str] = []
+    dropped: list[str] = []   # what an earlier draft added beyond the facts, so the founder can see the check at work
     for attempt in range(2):
         out = await gemini_json(system, user + (f"\n\nYour last draft used words that are not in FACTS: {', '.join(unsupported)}. Remove them."
                                                if unsupported else ""))
@@ -288,13 +339,14 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
             continue
         unsupported = verify_draft(re.sub(r"\[[^\]]*\]", " ", subject + "\n" + body), facts, founder)
         if not unsupported:
-            return {"kind": kind, "subject": subject, "body": body, "facts": facts, "model": GEMINI_MODEL,
-                    "checked": True, "fallback": False, "chars": len(body),
-                    "note": "Written by Gemini from the facts below. Every name and number was checked against them."}
-    return {"kind": kind, **fallback, "facts": facts, "model": None, "checked": True, "fallback": True,
-            "chars": len(fallback["body"]),
-            "note": "Built from the facts below without a language model."
-                    + (f" Gemini's version was dropped: it added {', '.join(unsupported[:4])}." if unsupported else "")}
+            return _finish(kind, subject, body, result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=dropped,
+                           note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
+                                + (f" Its first draft was dropped: it added {', '.join(dropped[:4])}." if dropped else ""))
+        dropped = unsupported[:6]
+    return _finish(kind, fallback["subject"], fallback["body"], result, lead, founder, model=None, fallback=True,
+                   note="Built from the facts below without a language model."
+                        + (f" Gemini's version was dropped: it added {', '.join(unsupported[:4])}." if unsupported else ""),
+                   rejected=unsupported[:6])
 
 
 # ---------------------------------------------------------------------------------------------- says vs did
@@ -429,7 +481,8 @@ async def says(cala: Cala, lead: dict) -> dict:
     quotes.sort(key=lambda q: order[q["topic"]])
     base.update({"available": True, "quotes": quotes[:4], "model": GEMINI_MODEL if out is not None else None,
                  "reason": None if quotes else "No sentence about how it invests was found on its site."})
-    blob_put(key, base)
+    if out is not None:   # an answer made while Gemini was down is not kept
+        blob_put(key, base)
     return {**base, "did": did}
 
 
@@ -456,7 +509,7 @@ async def conflicts(cala: Cala, lead: dict, company_id: str, about: str) -> dict
         return {**base, "available": False, "reason": "Say what your company does, or pick it from Cala, to check for conflicts."}
     key = f"conflicts:{lead['id']}:{graph.norm(about_text)[:80]}"
     hit = blob_get(key, max_age=3 * 86400)
-    if hit:
+    if hit and hit.get("model"):   # an answer made while Gemini was down is not kept
         return hit
     names = [c["name"] for c in portfolio]
     out = await gemini_json(
@@ -487,11 +540,36 @@ async def conflicts(cala: Cala, lead: dict, company_id: str, about: str) -> dict
            "reason": None if opened else ("No portfolio company looked close enough to open." if out is not None
                                           else "Gemini is unavailable, so no portfolio company was opened."),
            "note": f"{len(portfolio)} portfolio companies in Cala. Gemini chose which to open; descriptions and industries are Cala's."}
-    blob_put(key, res)
+    if out is not None:
+        blob_put(key, res)
     return res
 
 
 # ---------------------------------------------------------------------------------------------- ask cala
+
+JUNK = re.compile(r"subscribe to see|sign up to|sign in to|log in to|cookies?\b|all rights reserved|\|\s*\||read more\b|click here", re.I)
+
+
+def _excerpt(content: str | None, about: str | None, limit: int = 300) -> str:
+    """The sentence of a scraped passage that the step rests on, word for word, without the page furniture."""
+    words = set(re.findall(r"[a-zåäöüé]{4,}", (about or "").lower()))
+    best, top = "", -1
+    for part in re.split(r"\s*\[\.\.\.\]\s*|\n\s*\n", content or ""):
+        part = re.sub(r"\s+", " ", part).strip()
+        for sent in re.split(r"(?<=[.!?])\s+(?=[A-ZÅÄÖ])", part):
+            if len(sent) < 30 or JUNK.search(sent) or sent.count("|") > 2:
+                continue
+            score = len(words & set(re.findall(r"[a-zåäöüé]{4,}", sent.lower())))
+            if score > top:
+                best, top = sent, score
+    if not best:   # a table: the cells from the first one the step talks about
+        cells = [c.strip() for c in re.split(r"\||\n", content or "")]
+        cells = [c for c in cells if len(c) > 2 and not JUNK.search(c) and not re.fullmatch(r"[-\s:]+", c)]
+        cells = list(dict.fromkeys(cells))
+        first = next((n for n, c in enumerate(cells) if words & set(re.findall(r"[a-zåäöüé]{4,}", c.lower()))), 0)
+        best = " · ".join(cells[first:first + 4])
+    return best[:limit].rstrip() + ("…" if len(best) > limit else "")
+
 
 async def ask(cala: Cala, lead: dict, q: str) -> dict:
     """One answer from Cala's knowledge search, with its reasoning steps and the facts behind each."""
@@ -511,11 +589,19 @@ async def ask(cala: Cala, lead: dict, q: str) -> dict:
             doc, src = o.get("document") or {}, o.get("source") or {}
             url = doc.get("url") or doc.get("endpoint") or src.get("url")
             if url:
-                origins.append({"publisher": src.get("name") or doc.get("name") or re.sub(r"https?://(www\.)?([^/]+).*", r"\2", url),
-                                "url": url})
+                host = re.sub(r"https?://(www\.)?([^/]+).*", r"\2", url)
+                origins.append({"publisher": host if "." in host else (src.get("name") or doc.get("name") or host), "url": url})
         bits[k["id"]] = {"id": k["id"], "content": k.get("content"), "origins": origins[:3]}
-    steps = [{"content": s.get("content"), "facts": [bits[r] for r in s.get("references", []) if r in bits]}
-             for s in d.get("explainability") or []]
+    steps = []
+    for st in d.get("explainability") or []:
+        seen, facts = set(), []
+        for r in st.get("references", []):
+            if r in bits:
+                f = {**bits[r], "content": _excerpt(bits[r]["content"], st.get("content"))}
+                if f["content"] and f["content"] not in seen:
+                    seen.add(f["content"])
+                    facts.append(f)
+        steps.append({"content": st.get("content"), "facts": facts[:4]})
     return {"available": True, "question": question, "answer": d.get("content"), "steps": steps,
             "facts": len(bits), "entities": [{"id": e["id"], "name": e["name"]} for e in (d.get("entities") or [])[:12]]}
 
@@ -612,17 +698,26 @@ async def slush_firms() -> dict[str, dict]:
     return _firms
 
 
+INVESTING_TITLE = re.compile(r"partner|principal|associate|investor|invest|analyst|venture|managing director|\bgp\b|founder|scout|"
+                             r"\bdirector\b|\bcio\b|\bceo\b|\bvp\b|vice president|portfolio manager|fund manager|angel", re.I)
+SUPPORT_TITLE = re.compile(r"marketing|event|community|office|talent|recruit|\bhr\b|people|communications?|\bpr\b|legal|counsel|"
+                           r"finance|accounting|controller|assistant|operations|platform|brand|content|design|intern\b|trainee", re.I)
+
+
 def at_slush(name: str) -> dict | None:
     """Head count and job titles of this investor's people in the Slush attendee directory. No names."""
     m = slush_mcp.match(_firms or {}, name)
     if not m:
         return None
-    titles = []
+    titles, investing = [], 0
     for p in m["people"]:
         t = re.sub(r"\s+(at|@)\s+.*$", "", p.get("title") or "", flags=re.I).strip(" ,")
+        if not INVESTING_TITLE.search(t) or SUPPORT_TITLE.search(t):
+            continue   # marketing, events and office staff do not take a pitch
+        investing += 1
         if t and t not in titles:
             titles.append(t)
-    return {"firm": m["firm"], "people": len(m["people"]), "titles": titles[:4]}
+    return {"firm": m["firm"], "people": investing, "registered": len(m["people"]), "titles": titles[:4]} if investing else None
 
 
 def slush_directory() -> dict:

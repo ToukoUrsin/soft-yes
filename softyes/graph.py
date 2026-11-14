@@ -94,8 +94,12 @@ def pretty(name: str) -> str:
     if not name:
         return name
     words = name.split()
-    while len(words) > 1 and (re.sub(r"\W", "", words[-1]).lower() in LEGAL or not re.sub(r"\W", "", words[-1])):
-        words.pop()
+    while len(words) > 1:
+        last = re.sub(r"\W", "", words[-1]).lower()
+        if last in LEGAL or not last or re.fullmatch(r"\([^)]*\)", words[-1]):   # 'X UG (haftungsbeschränkt) & Co. KG'
+            words.pop()
+        else:
+            break
     # 'Lakestar Advisors', 'Ugly Duckling Ventures Management', 'HEADLINE SERVICES US': the firm, not its management company
     if len(words) > 2 and words[-1].lower() in ("us", "uk") and words[-2].lower() in TAIL:
         words.pop()
@@ -105,6 +109,24 @@ def pretty(name: str) -> str:
         words = [w.upper() if w.lower() in ACRONYMS or (len(w) <= 3 and len(words) > 1 and w.isalpha() and n == 0)
                  else w.capitalize() for n, w in enumerate(words)]
     return " ".join(words).rstrip(",")
+
+
+URL_DATE = re.compile(r"[/_-](20[0-2]\d)[/-](0[1-9]|1[0-2])(?:[/-](0[1-9]|[12]\d|3[01]))?(?=[/_-])")
+
+
+def url_date(url: str) -> str | None:
+    """'/2022/05/17/helppy-secures-3m' and '/news/2018-12-01-flowhaven' carry the day the page was published."""
+    m = URL_DATE.search(re.sub(r"^https?://[^/]+", "", url).split("?")[0])
+    if not m or int(m.group(1)) > date.today().year:
+        return None
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3) or '01'}"
+
+
+def _far(a: str, b: str, days: int = 45) -> bool:
+    try:
+        return abs((date.fromisoformat(a[:10]) - date.fromisoformat(b[:10])).days) > days
+    except ValueError:
+        return False
 
 
 def sources(raw) -> list[dict]:
@@ -119,7 +141,11 @@ def sources(raw) -> list[dict]:
         if " | " in publisher or len(publisher) > 60:  # an article title, keep the host instead
             m = re.match(r"https?://(?:www\.)?([^/]+)", url)
             publisher = m.group(1) if m else publisher[:60]
-        out.append({"publisher": publisher, "url": url, "date": s.get("date"), "rank": s.get("source_rank")})
+        when = s.get("date")
+        in_url = url_date(url)
+        if in_url and (not when or _far(when, in_url)):
+            when = in_url   # Cala sometimes dates a page by the day it was crawled; the address carries the day it was published
+        out.append({"publisher": publisher, "url": url, "date": when, "rank": s.get("source_rank")})
     out.sort(key=lambda s: s.get("date") or "9999")
     return out
 
@@ -184,6 +210,31 @@ async def investor(cala: Cala, uid: str, ledger: Ledger | None = None, cache_onl
             "rounds": rounds, "portfolio": portfolio, "capped": len(rounds) >= ROUND_CAP}
 
 
+NOT_A_COMPANY_SITE = set("""techcrunch sifted forbes bloomberg reuters crunchbase pitchbook linkedin finsmes siliconangle
+venturebeat businesswire prnewswire globenewswire fortune wired medium substack twitter youtube wikipedia tracxn dealroom
+cbinsights yahoo google axios theverge hpcwire startupintros eu-startups siliconcanals techfundingnews thesaasnews vestbee
+calcalistech nordic9 arcticstartup kauppalehti talouselama yle helsinkitimes cision facebook github notion""".split())
+
+
+def issuer_from_urls(urls: list[str]) -> str | None:
+    """'databricks.com/…/press-releases/…' next to 'techcrunch.com/…/databricks-raises-4b…': the company is Databricks.
+    Only when a source sits on the company's own site and another site's address carries the same word."""
+    hosts = {}
+    for u in dict.fromkeys(urls):
+        m = re.match(r"https?://(?:www\.)?([^/]+)(/.*)?$", u)
+        if m:
+            hosts.setdefault(m.group(1).lower(), []).append((m.group(2) or "").lower())
+    best = None
+    for host in hosts:
+        root = host.split(".")[-2] if host.count(".") else host
+        if len(root) < 5 or root in NOT_A_COMPANY_SITE:
+            continue
+        n = sum(1 for other, paths in hosts.items() if other != host and any(re.search(rf"(?<![a-z]){re.escape(root)}(?![a-z])", p) for p in paths))
+        if n and (best is None or n > best[0]):
+            best = (n, root)
+    return best[1].capitalize() if best else None
+
+
 async def funding_round(cala: Cala, rid: str, ledger: Ledger | None = None, cache_only: bool = False) -> dict | None:
     """One call: a round's date, size, issuer and every participant with its lead flag and sources."""
     d = await cala.call("POST", f"/entities/{rid}", body=ROUND_BODY, ledger=ledger, cache_only=cache_only)
@@ -211,6 +262,10 @@ async def funding_round(cala: Cala, rid: str, ledger: Ledger | None = None, cach
             issuer = {"id": x["id"], "name": pretty(x["name"])}
         elif xp.get("role") in (None, "INVESTOR"):
             investors.append(item)
+    if issuer is None:   # Cala holds some rounds without their company; its own press page among the sources names it
+        name = issuer_from_urls([u for u in tagged] + [x["url"] for i in investors for x in i["sources"]])
+        if name:
+            issuer = {"id": None, "name": name, "from_sources": True}
     label = p.get("round_label")
     amount = p.get("transaction_value") if isinstance(p.get("transaction_value"), (int, float)) else None
     currency = p.get("transaction_value_units")
