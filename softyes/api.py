@@ -319,6 +319,10 @@ def _close(q: str, limit: int = 3) -> list[dict]:
         if len(w) < (5 if w != first else 4):
             continue
         for r in difflib.get_close_matches(w, list(roots), n=limit, cutoff=cutoff):
+            # "Zxqv Capital Partners" is not "IQ Capital Partners": the part that is the firm's own has to be close too
+            own = graph.root(roots[r]["name"])[0] or roots[r]["key"]
+            if w == full and w != want and difflib.SequenceMatcher(None, want, own).ratio() < 0.6:
+                continue
             if r != w and roots[r]["rounds"] >= floor and roots[r] not in out:
                 out.append(roots[r])
     return out[:limit]
