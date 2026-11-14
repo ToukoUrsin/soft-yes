@@ -143,6 +143,8 @@ export interface Result {
   credits?: { used: number; cap: number; cached_calls: number }
   profile?: Profile | null
   slush?: { connected: boolean; firms: number; people: number; leads_attending: number }
+  /** Set on a first result while the second pass is still reading these investors; gone from the final one. */
+  pending?: string[]
 }
 
 export interface Profile {
@@ -162,6 +164,8 @@ export interface Config {
   gemini: boolean
   oxylabs: boolean
   slush?: { connected: boolean; firms: number; people: number }
+  /** Address of Soft Yes as an MCP server, for a founder's own assistant. */
+  mcp?: string
 }
 
 export interface Example {
@@ -180,6 +184,8 @@ export interface Suggestion {
   type: string | null
   description: string | null
   known_rounds: number
+  /** The name typed is close to this one but not the same: a likely misspelling. */
+  did_you_mean?: boolean
 }
 
 export interface Company {
@@ -301,15 +307,27 @@ export class ApiError extends Error {
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const RETRY_MS = [400, 1200, 2500]
+export const OFFLINE = 'No connection to Soft Yes right now. Check your network and try again.'
+
+/** Every call is a read or repeats safely, so a dropped connection or a gateway hiccup is retried quietly. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response
-  try {
-    res = await fetch(path, init)
-  } catch (e) {
-    if ((e as Error).name === 'AbortError') throw e
-    throw new ApiError(0, 'The server did not answer. Check that Soft Yes is running, then try again.')
-  }
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response | null = null
+    try {
+      res = await fetch(path, init)
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw e
+    }
+    if (res?.ok) return (await res.json()) as T
+    const transient = !res || (res.status >= 502 && res.status <= 504)
+    if (transient && attempt < RETRY_MS.length) {
+      await sleep(RETRY_MS[attempt])
+      if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      continue
+    }
+    if (!res) throw new ApiError(0, OFFLINE)
     let detail = ''
     try {
       const body = await res.json()
@@ -317,9 +335,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* not JSON */
     }
-    throw new ApiError(res.status, detail || `The server answered ${res.status}.`)
+    throw new ApiError(res.status, detail || (transient ? OFFLINE : `The server answered ${res.status}.`))
   }
-  return (await res.json()) as T
 }
 
 const qs = (params: Record<string, string | undefined | null>) =>

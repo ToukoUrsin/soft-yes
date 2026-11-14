@@ -414,6 +414,9 @@ const BASE_DELAY: Record<WalkEvent['t'], number> = {
 const TARGET_MS = 8200
 const SETTLE_MS = 950
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const RETRY_MS = [600, 1500, 3000]
+
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
 class WalkStore {
@@ -460,9 +463,10 @@ class WalkStore {
     this.set({ ...initial, mode, inputs, phase: 'walking', generation: this.state.generation + 1, narration: 'Asking Cala', detail: '' })
   }
 
-  /** A finished run, shown as is. */
+  /** A stored run, shown as is. If its second pass is still reading at the server, wait for the final result. */
   show(result: Result) {
     this.reset('static', inputFromResult(result))
+    const reading = result.pending ?? []
     this.set({
       ...this.state,
       phase: 'done',
@@ -473,7 +477,12 @@ class WalkStore {
       runId: result.run_id,
       narration: '',
       detail: '',
+      deep: reading.length ? { reading, line: `Cala's knowledge search is reading reports that name ${listAnd(reading)}`, added: 0 } : null,
     })
+    if (reading.length) {
+      this.gotPartial = true
+      void this.follow(result.run_id, this.state.generation)
+    }
   }
 
   /** Play a stored run again, from its own data. No Cala calls. */
@@ -483,33 +492,66 @@ class WalkStore {
     this.push(eventsFromResult(result))
   }
 
-  /** A live walk. */
+  /**
+   * A live walk. The server finishes and stores a walk even when the connection to it drops, and Cala's
+   * answers are kept, so a drop is not an error: before the first result the walk is asked for again,
+   * after it the final result is fetched when it is ready.
+   */
   async start(inputs: WalkInputs) {
     this.reset('live', inputs)
-    const abort = new AbortController()
-    this.abort = abort
     const generation = this.state.generation
     const mine = () => this.state.generation === generation
-    try {
-      const res = await fetch('/api/walk', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ soft_yeses: inputs.soft_yeses, stage: inputs.stage ?? undefined, company: inputs.company ?? undefined }),
-        signal: abort.signal,
-      })
-      if (!res.ok || !res.body) {
-        let detail = ''
-        try {
-          detail = (await res.json())?.detail ?? ''
-        } catch {
-          /* not JSON */
+    for (let attempt = 0; ; attempt++) {
+      const abort = new AbortController()
+      this.abort = abort
+      let refused: string | null = null
+      try {
+        const res = await fetch('/api/walk', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ soft_yeses: inputs.soft_yeses, stage: inputs.stage ?? undefined, company: inputs.company ?? undefined }),
+          signal: abort.signal,
+        })
+        if (res.ok && res.body) {
+          if (await this.read(res.body, mine)) return
+        } else if (res.status < 502 || res.status > 504) {
+          let detail = ''
+          try {
+            detail = (await res.json())?.detail ?? ''
+          } catch {
+            /* not JSON */
+          }
+          refused = typeof detail === 'string' && detail ? detail : `The server answered ${res.status}.`
         }
-        throw new Error(typeof detail === 'string' && detail ? detail : `The server answered ${res.status}.`)
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return
       }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finished = false
+      if (!mine()) return
+      if (refused) {
+        this.push([{ t: 'error', message: refused }])
+        return
+      }
+      if (this.gotPartial && this.state.runId) {
+        void this.follow(this.state.runId, generation)
+        return
+      }
+      if (attempt >= RETRY_MS.length) {
+        this.push([{ t: 'error', message: 'The connection dropped and did not come back. Try again: what Cala already answered is kept, so it is quick.' }])
+        return
+      }
+      await sleep(RETRY_MS[attempt])
+      if (!mine()) return
+      this.rewind()
+    }
+  }
+
+  /** Reads the event stream. True when it ended with a result or an error of its own; false when it was cut. */
+  private async read(body: ReadableStream<Uint8Array>, mine: () => boolean): Promise<boolean> {
+    const reader = body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finished = false
+    try {
       for (;;) {
         const { value, done } = await reader.read()
         if (done) break
@@ -531,12 +573,46 @@ class WalkStore {
         }
         if (batch.length && mine()) this.push(batch)
       }
-      if (!finished && mine()) this.push([{ t: 'error', message: 'The walk stopped before it finished. Try again.' }])
     } catch (err) {
-      if ((err as Error).name === 'AbortError' || !mine()) return
-      const msg = (err as Error).message
-      this.push([{ t: 'error', message: /fetch|network/i.test(msg) ? 'The server did not answer. Check that Soft Yes is running, then try again.' : msg }])
+      if ((err as Error).name === 'AbortError') throw err
     }
+    return finished
+  }
+
+  /** The same walk asked for again after a cut, before it had a result: start the picture over, quietly. */
+  private rewind() {
+    if (this.timer != null) clearTimeout(this.timer)
+    this.timer = null
+    this.queue = []
+    this.budget = 0
+    this.played = 0
+    this.total = 0
+    this.final = null
+    const { inputs, generation, mode } = this.state
+    this.set({ ...initial, mode, inputs, generation, phase: 'walking', narration: 'Asking Cala', detail: '' })
+  }
+
+  /** The first result is on screen and the stream is gone: the walk goes on at the server, so wait for what it stores. */
+  private async follow(runId: string, generation: number) {
+    const until = Date.now() + 150_000
+    while (Date.now() < until) {
+      await sleep(2500)
+      if (this.state.generation !== generation) return
+      try {
+        const res = await fetch(`/api/run/${encodeURIComponent(runId)}`)
+        if (res.ok) {
+          const result = (await res.json()) as Result
+          if (this.state.generation !== generation) return
+          if (!result.pending?.length) {
+            this.push([{ t: 'done', run_id: result.run_id, result }])
+            return
+          }
+        }
+      } catch {
+        /* offline for a moment: keep waiting */
+      }
+    }
+    if (this.state.generation === generation) this.set({ ...this.state, deep: null })
   }
 
   skip() {

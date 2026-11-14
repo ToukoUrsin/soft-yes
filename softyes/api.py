@@ -308,9 +308,10 @@ async def _run(inputs: dict, emit) -> dict:
             if inputs.get("deep") or (s.get("followed") or 0) < walk_mod.DEEP_BELOW}
     if deep:
         result["credits"] = _credits()
+        # A first result is stored marked as unfinished, so a page that reloads or loses its stream can wait for the rest.
+        result["pending"] = [s["name"] for s in result["soft_yeses"] if s["key"] in deep]
         _save_run(inputs, result)
-        await emit({"t": "partial", "run_id": result["run_id"], "result": _annotate(result),
-                    "reading": [s["name"] for s in result["soft_yeses"] if s["key"] in deep]})
+        await emit({"t": "partial", "run_id": result["run_id"], "result": _annotate(result), "reading": result["pending"]})
 
         async def quiet(event: dict) -> None:   # the second pass repeats the graph walk from cache: do not replay it
             if event["t"] in ("knowledge", "captable", "note", "ledger") or \
@@ -352,7 +353,11 @@ async def walk(request: Request):
     async def stream():
         try:
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(queue.get(), 10)
+                except asyncio.TimeoutError:
+                    yield ": still walking\n\n"   # the knowledge pass can be silent for a minute; keep the line open
+                    continue
                 if event is None:
                     break
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -369,6 +374,8 @@ async def run(run_id: str):
     result = load_run(run_id)
     if not result:
         raise HTTPException(404, "No such run")
+    if result.get("pending") and time.time() - result["created"] > 240:
+        result.pop("pending")   # the second pass never reported back (a restart): the first result stands
     return _annotate(result)
 
 

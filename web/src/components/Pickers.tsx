@@ -100,7 +100,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
               >
                 <span className="opt__main">
                   <span className="opt__name truncate"><Highlight text={s.name} q={q} /></span>
-                  <span className="opt__type">{typeLabel(s)}</span>
+                  <span className="opt__type">{s.did_you_mean ? 'Closest name in Cala' : typeLabel(s)}</span>
                 </span>
                 <span className="opt__side num">
                   {off ? 'Added' : s.known_rounds > 0 ? `${plural(s.known_rounds, 'round')} in Cala` : ''}

@@ -5,7 +5,7 @@ import { isMac, listAnd, plural } from '../lib/format'
 import { recentRuns, useConfig, useSessionState, useTask } from '../lib/store'
 import { walkStore } from '../lib/walk'
 import { SingleField, TokenField, type Token } from '../components/Pickers'
-import { Icon, Segmented } from '../components/ui'
+import { CopyButton, Icon, Segmented } from '../components/ui'
 
 function useExamples(): Example[] | null {
   const [examples, set] = useState<Example[] | null>(null)
@@ -272,6 +272,18 @@ function SoftYesAsk({ config }: { config: Config | null }) {
           Every fact comes from Cala with its source. No language model states a fact: one only phrases the messages, from facts it is
           handed, and each draft is checked against them.
         </p>
+        {config?.mcp && (
+          <div className="home__mcp">
+            <p>
+              <b>Rather ask your own assistant?</b> Soft Yes is also an MCP server. Add this address and ask it who could lead your
+              round.
+            </p>
+            <p className="home__mcprow">
+              <code className="truncate">{config.mcp}</code>
+              <CopyButton text={config.mcp} label="Copy" className="btn btn--ghost" />
+            </p>
+          </div>
+        )}
       </div>
     </main>
   )

@@ -653,7 +653,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         counts = collections.Counter()
         for e in leads.values():
             n = sum(1 for link in e["rounds"].values() if s["key"] in link["with"])
-            if n:
+            if n and not doubt(e):  # a name Cala may have tied to the wrong company is not a habit to report
                 counts[e["name"]] = n
         soft_out.append({k: s.get(k) for k in ("key", "name", "ids", "kind", "found", "rounds_in_cala", "led", "followed",
                                                 "lead_rate", "walked", "capped", "pulse", "description", "led_rounds", "cap_companies",
