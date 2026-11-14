@@ -1,20 +1,19 @@
-import type { ReactNode } from 'react'
+import { useEffect, useReducer, useState, type ReactNode } from 'react'
 import { Link } from 'wouter'
-import { investorHref, type Lead, type Result, type Why } from '../lib/api'
+import { api, investorHref, type Lead, type Result, type SaysLine, type Why } from '../lib/api'
 import { capped, dealPhrase, fmtDate, fmtMoney, fmtMonth, listAnd, plural, possessive } from '../lib/format'
 import { Deal } from './Deal'
-import { AskCala, Conflicts, Drafts, References, SaysDid, Slush } from './Tools'
+import { Drafts, SaysDid, Slush } from './Tools'
 import { CheckLabel } from './Evidence'
 import { Icon, Investor, InvestorList, N, Segmented } from './ui'
 import { YearBars } from './YearBars'
 
-export type Tab = 'record' | 'reach' | 'before' | 'ask'
+export type Tab = 'record' | 'reach' | 'before'
 
 const TABS: { id: Tab; name: string }[] = [
   { id: 'record', name: 'Record' },
   { id: 'reach', name: 'Reach out' },
   { id: 'before', name: 'Before you meet' },
-  { id: 'ask', name: 'Ask Cala' },
 ]
 
 export function WhyList({ why }: { why: Why[] }) {
@@ -38,10 +37,104 @@ function rowWhy(lead: Lead): Lead['why'] {
   return [...head, ...lead.why.slice(2).filter((w) => w.tone === 'warn')].slice(0, 3)
 }
 
-function Row({ lead, selected, onSelect }: { lead: Lead; selected: boolean; onSelect: (byKeyboard: boolean) => void }) {
+// What the first five leads say on their own sites. A stored run carries it; a walk that just ended asks once.
+const SAYS_ROWS = 5
+type SaysRead = { status: 'reading' | 'done'; items: Map<string, SaysLine | null> }
+const saysRead = new Map<string, SaysRead>()
+
+function useSaysTop(result: Result, ready: boolean): SaysRead | null {
+  const [, bump] = useReducer((n: number) => n + 1, 0)
+  const missing = result.leads.slice(0, SAYS_ROWS).some((l) => l.says === undefined)
+  useEffect(() => {
+    if (!missing || !ready) return
+    let alive = true
+    const again = () => alive && bump()
+    let read = saysRead.get(result.run_id)
+    if (!read) {
+      read = { status: 'reading', items: new Map() }
+      saysRead.set(result.run_id, read)
+      const mine = read
+      api.saysTop(result.run_id).then(
+        (r) => {
+          for (const i of r.items) mine.items.set(i.key, i.says ?? null)
+          mine.status = 'done'
+          window.dispatchEvent(new Event('softyes:says'))
+        },
+        () => {
+          // Nothing to show is a fine answer here: the tab still reads the site on request.
+          mine.status = 'done'
+          window.dispatchEvent(new Event('softyes:says'))
+        },
+      )
+    }
+    // Whoever asked first holds the read; everyone showing it draws again now that there is one.
+    bump()
+    window.addEventListener('softyes:says', again)
+    return () => {
+      alive = false
+      window.removeEventListener('softyes:says', again)
+    }
+  }, [missing, ready, result.run_id])
+  return missing ? (saysRead.get(result.run_id) ?? null) : null
+}
+
+/** What to put under a lead's row: its line, "reading" while it is fetched, or nothing. Only the first five have one. */
+export function useSays(result: Result, settled: boolean): (l: Lead) => SaysLine | 'reading' | null {
+  const read = useSaysTop(result, settled)
+  const top = new Set(result.leads.slice(0, SAYS_ROWS).map((l) => l.key))
+  return (l) => {
+    if (!top.has(l.key)) return null
+    if (l.says !== undefined) return l.says
+    if (!read) return null
+    return read.status === 'reading' ? 'reading' : (read.items.get(l.key) ?? null)
+  }
+}
+
+/** One sentence from the investor's own site, word for word, over what it did in Cala. */
+export function SaysRow({ lead, says }: { lead: Lead; says: SaysLine | 'reading' }) {
+  const [open, setOpen] = useState(false)
+  if (says === 'reading') {
+    return (
+      <p className="lead-says lead-says--reading" role="status">
+        <i aria-hidden="true" />
+        Reading what {lead.name} says on its own site
+      </p>
+    )
+  }
+  return (
+    <dl className="lead-says">
+      <div>
+        <dt>Says</dt>
+        <dd>
+          <button
+            type="button"
+            className={`lead-says__quote${open ? ' is-open' : ''}`}
+            aria-expanded={open}
+            title={open ? undefined : says.quote}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <q>{says.quote}</q>
+          </button>
+          <a className="src" href={says.url} target="_blank" rel="noopener noreferrer" title={`Open the page on ${says.site}\n${says.url}`}>
+            <span>{says.site}</span>
+            <Icon name="out" size={11} />
+          </a>
+        </dd>
+      </div>
+      <div>
+        <dt>Did</dt>
+        <dd>{says.did}</dd>
+      </div>
+    </dl>
+  )
+}
+
+function Row({
+  lead, selected, onSelect, says,
+}: { lead: Lead; selected: boolean; onSelect: (byKeyboard: boolean) => void; says?: SaysLine | 'reading' | null }) {
   const last = lead.pulse ? lead.last_led?.date : null
   return (
-    <li>
+    <li className="lead-item" data-current={selected || undefined}>
       <button type="button" className="lead-row" aria-current={selected || undefined} data-lead={lead.key} onClick={(e) => onSelect(e.detail === 0)}>
         <span className="lead-row__rank num">{lead.ring === 1 ? lead.rank : ''}</span>
         <span className="lead-row__body">
@@ -67,13 +160,21 @@ function Row({ lead, selected, onSelect }: { lead: Lead; selected: boolean; onSe
           )}
         </span>
       </button>
+      {says && <SaysRow lead={lead} says={says} />}
     </li>
   )
 }
 
 export function LeadList({
-  result, selected, onSelect,
-}: { result: Result; selected: string | null; onSelect: (key: string, byKeyboard: boolean) => void }) {
+  result, selected, onSelect, settled = true,
+}: {
+  result: Result
+  selected: string | null
+  onSelect: (key: string, byKeyboard: boolean) => void
+  /** False while the walk is still reading further: the list may yet change, so nothing slow is asked for it. */
+  settled?: boolean
+}) {
+  const saysFor = useSays(result, settled)
   return (
     <div className="leads" role="navigation" aria-label="Ranked leads">
       {(result.tiers?.length ? result.tiers : [null]).map((t) => (
@@ -89,7 +190,7 @@ export function LeadList({
           )}
           <ol className="leads__list">
             {result.leads.filter((l) => !t || l.tier === t.id).map((l) => (
-              <Row key={l.key} lead={l} selected={selected === l.key} onSelect={(kb) => onSelect(l.key, kb)} />
+              <Row key={l.key} lead={l} selected={selected === l.key} onSelect={(kb) => onSelect(l.key, kb)} says={saysFor(l)} />
             ))}
           </ol>
         </div>
@@ -227,6 +328,11 @@ function Record({ lead, onReach }: { lead: Lead; onReach: () => void }) {
               ) : (
                 <>
                   with <InvestorList names={e.with} />
+                  {e.with.some((_, i) => e.with_on_page?.[i] === false) && (
+                    <span className="faint" title="Cala lists it as an investor in this round. The page it cites was read and does not name it.">
+                      {' '}(the announcement does not name {listAnd(e.with.filter((_, i) => e.with_on_page?.[i] === false))})
+                    </span>
+                  )}
                 </>
               )}
               {e.via === 'knowledge' && (
@@ -343,7 +449,7 @@ function Record({ lead, onReach }: { lead: Lead; onReach: () => void }) {
         )}
         {lead.last_led && !otherLed.length && p && p.rounds > 0 && (
           <p className="faint ov__note">
-            Most recent round it led in Cala: {dealPhrase(lead.last_led)}{lead.last_led.date ? `, ${fmtDate(lead.last_led.date)}` : ''}.
+            Most recent round it led in Cala: {dealPhrase({ ...lead.last_led, date: null })}{lead.last_led.date ? `, ${fmtDate(lead.last_led.date)}` : ''}.
           </p>
         )}
       </section>
@@ -424,17 +530,8 @@ export function LeadDetail({
               <h3>What it says, what it did</h3>
               <SaysDid lead={lead} result={result} />
             </section>
-            <section className="ov__sec">
-              <h3>Competitors it already backs</h3>
-              <Conflicts lead={lead} result={result} />
-            </section>
-            <section className="ov__sec">
-              <h3>Founders to call</h3>
-              <References lead={lead} result={result} />
-            </section>
           </div>
         )}
-        {tab === 'ask' && <AskCala lead={lead} result={result} />}
       </div>
     </article>
   )

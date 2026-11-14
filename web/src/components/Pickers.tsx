@@ -141,7 +141,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
       )}
       {state.items.length > 0 && (
         <p className="pop__foot">
-          <span>{active < 0 && !sure && fresh ? 'More than one could be it. Pick one.' : state.source === 'cala' ? 'Searched Cala' : 'From what Cala has already returned'}</span>
+          <span>{active < 0 && !sure && fresh ? (state.items.length === 1 ? 'Not an exact match. Pick it if it is the one.' : 'More than one could be it. Pick one.') : state.source === 'cala' ? 'Searched Cala' : 'From what Cala has already returned'}</span>
           <span className="pop__keys"><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> move <kbd className="kbd">Enter</kbd> add</span>
         </p>
       )}

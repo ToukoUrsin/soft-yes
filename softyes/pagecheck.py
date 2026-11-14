@@ -95,6 +95,11 @@ def variants(name: str) -> list[str]:
         rest = " ".join(words)
         if len(words) > 1 or (len(rest) >= 6 and rest.lower() not in graph.GENERIC_BASE):
             out.append(rest)
+    typed, key = re.sub(r"[^a-z0-9]", "", name.lower()), graph.norm(name)
+    if typed in graph.FULL_OF:   # "NEA" on Cala's side, "New Enterprise Associates" on the page, or the other way round
+        out.append(graph.FULL_OF[typed])
+    out += [short if short == "a16z" else short.upper() for short, full in graph.FULL_OF.items()
+            if graph.norm(full) == key and short != typed]
     return list(dict.fromkeys(out))
 
 
@@ -130,7 +135,8 @@ SPACED = re.compile(r"[ \t]+([,.;])(?=[ \t\n]|$|[\"”’)])")
 
 def tidy(text: str) -> str:
     """A page's markup leaves a space before a comma or a full stop ('led by <a>Sofina</a> , the'): the reader never sees it."""
-    return re.sub(r"(?<=s) (['’])(?= )", r"\1", SPACED.sub(r"\1", text or ""))   # "Menlo Ventures ' Anthology fund"
+    text = re.sub(r"[ \t]*(?:<!--|--+>)[ \t]*", " ", text or "")   # what is left of a comment in the page's markup
+    return re.sub(r"(?<=s) (['’])(?= )", r"\1", SPACED.sub(r"\1", text))   # "Menlo Ventures ' Anthology fund"
 
 
 def _breaks(text: str, lo: int, hi: int):
@@ -243,6 +249,22 @@ def _other_round(sent: str, stage: str | None, year: str | None) -> bool:
     return bool(EARLIER.search(sent))
 
 
+ROUND_IN = re.compile(r"(?:round|investment|funding|financing|raise|seed|series [a-h])\s+(?:in|of|for|into)\s+"
+                      r"((?:[A-Z][\w&.'’-]*)(?:\s+[A-Z][\w&.'’-]*){0,3})")
+NOT_A_COMPANY = re.compile(r"^(?:january|february|march|april|may|june|july|august|september|october|november|december|q[1-4]|"
+                           r"europe|finland|sweden|norway|denmark|germany|france|spain|italy|the|its|this|a|an|"
+                           r"london|berlin|paris|helsinki|stockholm|asia|africa|america|india|china|japan|israel|"
+                           r"uk|us|usa|eu|ai|new|north|south|latin|silicon|series|seed|pre)\b", re.I)
+
+
+def _other_company(sent: str, company: str | None) -> bool:
+    """'Cherry Ventures leads a €6M round in Marble Imaging' on a page about Heywa Labs: a teaser for another deal.
+    True when the sentence says whose round it is, and it is not this company's."""
+    if not company or any(_find(sent, k) for k in company_keys(company)):
+        return False
+    return any(not NOT_A_COMPANY.match(m.group(1)) for m in ROUND_IN.finditer(sent))
+
+
 def read(text: str, investor: str, company: str | None = None, stage: str | None = None, year: str | None = None) -> dict:
     """What the page says about `investor`, and the sentence it rests on. status:
     lead      the page says it led            follower  the page names another lead and lists it in the round
@@ -257,7 +279,8 @@ def read(text: str, investor: str, company: str | None = None, stage: str | None
         if b - a > 700:   # a page without sentence breaks: a window around the name
             a, b = max(a, at - 260), min(b, end + 260)
         sent = text[a:b]
-        other = _other_round(sent, stage, year)   # a sentence about an earlier round proves nothing about this one
+        # a sentence about an earlier round, or about another company's round, proves nothing about this one
+        other = _other_round(sent, stage, year) or _other_company(sent, company)
         led = not other and _says_led(sent, at - a, end - a)
         followed = not other and not led and _says_followed(sent, at - a, end - a)
         score = (4 if led else 2 if followed else 0) + (1 if company and _find(sent, company_key(company)) else 0) + \
@@ -301,6 +324,8 @@ def _trim(sent: str, at: int) -> str:
             body = body.lstrip(" ,.;:)–—-")
         sent = ("… " if a else "") + body + (" …" if b < len(sent) else "")
     sent = re.sub(r"\s+", " ", sent)
+    # a byline or a share link glued on after the full stop ("... infrastructure. by") is not part of the sentence
+    sent = re.sub(r"(?<=[.!?”\"])\s+(?:by|share|read more|more|tags?|source|photo)\s*:?$", "", sent, flags=re.I)
     return re.sub(r" ([,.;])(?= |$|[\"”’)])", r"\1", sent)
 
 
@@ -438,7 +463,7 @@ async def check_round(rd: dict) -> dict:
     srcs = pick_pages(rd)
     pages = await asyncio.gather(*(page(x["url"]) for x in srcs))
     out = {"id": rd["id"], "tried": len(srcs), "read": 0, "off_topic": 0, "leads": {}, "followers": {}, "mentions": {},
-           "named": [], "amount": None, "stages": [], "headline": [], "pages": [], "published": {}, "dated": {},
+           "named": [], "also_named": [], "amount": None, "stages": [], "headline": [], "pages": [], "published": {}, "dated": {},
            "page_stages": {}}
     for src, pg in zip(srcs, pages):
         text = tidy(pg["text"])
@@ -470,6 +495,9 @@ async def check_round(rd: dict) -> dict:
                 out[book].setdefault(key, {"quote": got["quote"], "url": src["url"], "publisher": src.get("publisher")})
             if got.get("listed"):
                 out["followers"].setdefault(key, {"quote": got["listed"], "url": src["url"], "publisher": src.get("publisher")})
+        for key, name in rd.get("look_for") or []:   # the investors who said yes: does a page name them in this round?
+            if key not in out["also_named"] and any(_spans(text, v) for v in variants(name)):
+                out["also_named"].append(key)
         if rd.get("amount"):
             out["amount"] = bool(out["amount"]) or amount_on_page(text, rd["amount"])
         for st in on_page:

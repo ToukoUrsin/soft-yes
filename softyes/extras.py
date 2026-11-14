@@ -137,7 +137,7 @@ def deal_phrase(d: dict) -> str:
                  .replace("Series c", "Series C").replace("Series d", "Series D")
     money = fmt_money(d.get("amount"), d.get("currency"))
     when = fmt_month(d.get("date"))
-    core = f"{issuer}'s {money + ' ' if money else ''}{stage}"
+    core = f"{issuer}{chr(39) if issuer.endswith(('s', 'S')) else chr(39) + 's'} {money + ' ' if money else ''}{stage}"
     return f"{core} ({when})" if when else core
 
 
@@ -176,8 +176,12 @@ def cala_facts(result: dict, lead: dict) -> list[str]:
         [d for d in ev if _status(d) not in ("unstated", "other", "absent", "off")] or ev
     for d in rows[:4]:
         who = " and ".join(d["with"])
-        verb = "led" if lead["ring"] == 1 else "took part in"
-        facts.append(f"{name} {verb} {deal_phrase(d)}. {who} took part in that round.")
+        co = [c for c in d.get("co_leads") or [] if c][:2]
+        verb = ("co-led" if co else "led") if lead["ring"] == 1 else "took part in"
+        unnamed = [w for w, on in zip(d["with"], d.get("with_on_page") or []) if on is False]
+        facts.append(f"{name} {verb} {deal_phrase(d)}{' together with ' + ' and '.join(co) if co else ''}. "
+                     + (f"{who} took part in that round." if not unnamed else
+                        f"{who} is listed as an investor in that round, but the announcement does not name {' or '.join(unnamed)}."))
     if lead["ring"] == 1:
         for a in lead.get("asks") or []:
             n = sum(1 for d in rows if a["name"] in d["with"])
@@ -236,11 +240,16 @@ def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
     raising = re.sub(r"^(an?|our|the)\s+", "", founder.get("raising") or "", flags=re.I) or "[round]"
     a_raising = ("an " if raising[:1].lower() in "aeiou8" else "a ") + raising if raising != "[round]" else raising
     one = _stop(founder.get("one_liner") or "") or "[one line on what you do]"
-    led_verb = "led" if lead["ring"] == 1 else "joined"
+    last = ask.get("last") or {}
+    co_led = bool(last.get("co_leads")) and lead["ring"] == 1
+    led_verb = ("co-led" if co_led else "led") if lead["ring"] == 1 else "joined"
+    # the announcement names the lead but not always every investor: then say "listed", not "in the round"
+    named = not any(w == soft and on is False for w, on in zip(last.get("with") or [], last.get("with_on_page") or []))
     if kind == "intro_ask":
         subject = f"Intro to {name}?"
         body = (f"Hi,\n\nYou said {soft} would join our {raising} once a lead is in. "
-                + (f"{name} {led_verb} {deal}, with {soft} in the round. " if deal else "")
+                + (f"{name} {led_verb} {deal}, " + (f"with {soft} in the round. " if named else f"and {soft} is listed as an investor there. ")
+                   if deal else "")
                 + f"Would you introduce us to the partner you worked with there?\n\n"
                   f"Two lines you can forward: {company}: {one} We are raising {a_raising} and {soft} has said it will follow.\n\nThanks")
     elif kind == "slush":
@@ -303,8 +312,8 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
                      f"in. Write to that person as 'you': {soft} is 'you', never 'they' or its name. Open with 'Hi,'. First recall "
                      f"that they said they would join once a lead is in. Then ask for one introduction, to {lead['name']}, and give "
                      f"the reason as something they know first hand: the most recent round {lead['name']} led that they were in "
-                     f"(company, stage, month), and how many such rounds there are if FACTS give more than one. Add one short "
-                     f"sentence from FACTS on how many rounds {lead['name']} led in the last 24 months, as the reason to ask now. "
+                     f"(company, stage, month), and how many such rounds there are if FACTS give more than one. Say 'co-led' when "
+                     f"FACTS say co-led. Give no statistics about {lead['name']}: they know the firm. "
                      f"End with a two-line blurb they can forward: what the company does, and the round being raised exactly as in "
                      f"FACTS. 70-100 words. Do not mention Cala.",
         "direct": f"A cold email from the founder to a partner at {lead['name']}. Write to them as 'you': {lead['name']} is "
@@ -319,6 +328,9 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
                  f"and stage), and a request for 25 minutes at Slush. Do not mention Cala.",
     }[kind]
     system = ("You write short, plain fundraising messages for a startup founder. Use ONLY the facts in FACTS. "
+              "When FACTS say an investor 'is listed as an investor in that round, but the announcement does not name' it, "
+              "write, to that investor, 'a round you are listed in as an investor'; never write that it took part, joined, or was "
+              "alongside. Write 'co-led' wherever FACTS say co-led. "
               "Never add a name, number, date, title, sector or claim that is not in FACTS. No flattery, no buzzwords, "
               "no exclamation marks, no em dashes, no repeated phrases. Sound like a founder writing to someone they have "
               "met: direct and warm. First person plural for the company. Only three things may be a bracketed placeholder "
@@ -338,6 +350,9 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
             unsupported = ["(over 300 characters)"]
             continue
         unsupported = verify_draft(re.sub(r"\[[^\]]*\]", " ", subject + "\n" + body), facts, founder)
+        if not unsupported and any("does not name" in f for f in facts) and \
+                re.search(r"took part|alongside|participat|you joined|you were in|with you in|you invested", body, re.I):
+            unsupported = ["that you took part (the announcement does not name you)"]
         if not unsupported:
             return _finish(kind, subject, body, result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=dropped,
                            note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
@@ -352,6 +367,7 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
 # ---------------------------------------------------------------------------------------------- says vs did
 
 def page_text(html: str) -> str:
+    html = re.sub(r"(?s)<!--.*?-->", " ", html)
     html = re.sub(r"(?is)<(script|style|noscript|svg|template)[^>]*>.*?</\1>", " ", html)
     html = re.sub(r"(?i)<br\s*/?>|</(p|div|li|h[1-6]|section|article|tr)>", "\n", html)
     text = html_mod.unescape(re.sub(r"<[^>]+>", " ", html))
@@ -397,6 +413,54 @@ async def scrape(url: str) -> dict:
     return out
 
 
+OXYLABS_SEARCH = "https://webapi.oxylabs.io/v1/search"
+NOT_ITS_SITE = re.compile(
+    r"(?:^|\.)(?:crunchbase|linkedin|pitchbook|wikipedia|x|twitter|facebook|instagram|youtube|dealroom|tracxn|cbinsights|"
+    r"bloomberg|nfx|vcsheet|openvc|techcrunch|forbes|glassdoor|medium|substack|zoominfo|rocketreach|golden|f6s|angel|"
+    r"wellfound|eu-startups|sifted|reuters|ft|businessinsider|owler|craft|apollo|theorg|seedtable|vestbee|parsers|"
+    r"unicorn-nest|ventureradar|harmonic|preqin|google|bing|reddit|github|tiktok|signal|dnb|opencorporates|finder|"
+    r"vainu|asiakastieto|allabolag|proff|northdata|startup|startups)\.[a-z.]+$", re.I)
+
+
+def _host(url: str) -> str:
+    m = re.match(r"(?:https?://)?([^/]+)", url or "")
+    return m.group(1).lower().removeprefix("www.") if m else ""
+
+
+async def find_site(name: str) -> dict:
+    """The firm's own site by Oxylabs' web search: the first result that is the firm's and not a directory (the firm's
+    name is in the page title or in the address). Returns {url, hosts}; kept, so one firm is looked up once."""
+    if not oxylabs_ready():
+        return {"url": None, "hosts": []}
+    key = "site2:" + graph.norm(name)
+    hit = blob_get(key, max_age=30 * 86400)
+    if hit:
+        return hit
+    words = [w for w in re.findall(r"[a-z0-9]+", (graph.root(name)[0] or name).lower()) if len(w) >= 4] or \
+        [w for w in re.findall(r"[a-z0-9]+", name.lower()) if len(w) >= 3][:1]
+    try:
+        r = await http().post(OXYLABS_SEARCH, json={"query": f"{name} venture capital investor"},
+                              headers={"Authorization": f"Bearer {os.environ['JUNCTION_OXYLABS_API_KEY']}"}, timeout=60)
+        results = (r.json().get("results") or []) if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        results = None
+    if results is None:
+        return {"url": None, "hosts": []}
+    url = None
+    for res in results[:6]:
+        m = re.match(r"https?://([^/]+)", res.get("url") or "")
+        if not m or NOT_ITS_SITE.search(m.group(1)):
+            continue
+        host, title = _host(res["url"]), (res.get("title") or "").lower()
+        head = re.sub(r"[^a-z0-9]", "", re.split(r" [|–-] |: ", title)[0])
+        if words and (words[0] in head or words[0] in host.replace("-", "")):
+            url = f"https://{m.group(1)}"
+            break
+    out = {"url": url, "hosts": [_host(res.get("url") or "") for res in results[:10]]}
+    blob_put(key, out)
+    return out
+
+
 ABOUT = re.compile(r"about|approach|thesis|criteria|strategy|what-we-do|how-we|philosophy|focus|invest(?!ors-login)|manifesto|faq", re.I)
 
 
@@ -438,11 +502,21 @@ async def says(cala: Cala, lead: dict) -> dict:
     website = (prof or {}).get("website")
     base = {"lead": lead["name"], "website": website, "website_sources": (prof or {}).get("website_sources", []),
             "hq": (prof or {}).get("hq"), "people": ((prof or {}).get("people") or [])[:8], "quotes": [], "pages": []}
+    # Cala's site for a firm can be missing, mistyped or a namesake's. Oxylabs' web search finds the firm's own site;
+    # it is used when Cala has none, or when Cala's is not among what the web returns for the firm's name.
+    found = await find_site(lead["name"])
+    if found["url"] and (not website or (found["hosts"] and _host(website) not in found["hosts"])):
+        website = found["url"]
+        base["website"], base["website_from"] = website, "search"
     if not website:
         return {**base, "available": False, "reason": "Cala has no website for this investor.", "did": did}
     if not re.match(r"https?://", website):
         website = "https://" + website
     home = await scrape(website)
+    if not home["text"] and found["url"] and _host(found["url"]) != _host(website):   # Cala's address does not open
+        website = found["url"]
+        base["website"], base["website_from"] = website, "search"
+        home = await scrape(website)
     pages = [home]
     origin = re.match(r"https?://[^/]+", website).group(0)
     seen = {website.rstrip("/")}
@@ -484,6 +558,33 @@ async def says(cala: Cala, lead: dict) -> dict:
     if out is not None:   # an answer made while Gemini was down is not kept
         blob_put(key, base)
     return {**base, "did": did}
+
+
+def _did_line(lead: dict, topic: str) -> str:
+    """Cala's side of 'says vs did', as one sentence: the stages it led at when the fund talks about stage, else how often it leads."""
+    p = lead.get("pulse") or {}
+    stages = [s for s in p.get("led_stages") or [] if s.get("n")][:3]
+    if topic == "stage" and stages:
+        return "In Cala it led " + ", ".join(f"{s['n']} {s['stage']}" for s in stages) + (" rounds." if len(stages) == 1 else ".")
+    led, rounds, recent = p.get("led") or 0, p.get("rounds") or 0, p.get("led_recent") or 0
+    of = f"the first {rounds} rounds Cala returns" if p.get("capped") else f"{rounds} round{'' if rounds == 1 else 's'}"
+    return f"In Cala it led {led} of {of}, {recent} in the last {p.get('recent_months') or 24} months."
+
+
+def says_line(lead: dict, got: dict | None = None) -> dict | None:
+    """One line for the lead's row: the fund's own sentence (from its site, word for word) next to what Cala shows it did.
+    Read from what is already kept; None when its site has not been read yet or says nothing about how it invests."""
+    got = got or blob_get("says:" + (lead.get("id") or lead["key"]), max_age=3 * 86400)
+    if not got or not got.get("quotes"):
+        return None
+    order = {"leads": 0, "stage": 1, "cheque": 2}   # whether it leads first, then at what stage
+    whole = [x for x in got["quotes"] if len(x["text"].split()) >= 8]   # a sentence, not a heading or a table cell
+    if not whole:
+        return None
+    q = min(whole, key=lambda x: order.get(x.get("topic"), 3))
+    site = re.sub(r"^https?://(www\.)?", "", q["url"]).split("/")[0]
+    from .pagecheck import tidy   # pagecheck imports this module
+    return {"quote": tidy(q["text"]), "topic": q["topic"], "url": q["url"], "site": site, "did": _did_line(lead, q["topic"])}
 
 
 # ---------------------------------------------------------------------------------------------- conflicts
@@ -721,7 +822,8 @@ def at_slush(name: str) -> dict | None:
 
 
 def slush_directory() -> dict:
-    return {"connected": slush_mcp.ready(), "firms": len(_firms or {}),
+    # the directory read through Slush's MCP is kept, so it is at hand even where the live connection is not
+    return {"connected": bool(_firms) or slush_mcp.ready(), "live": slush_mcp.ready(), "firms": len(_firms or {}),
             "people": sum(len(f["people"]) for f in (_firms or {}).values())}
 
 

@@ -6,12 +6,15 @@ import { fmtDate, listOr, plural } from '../lib/format'
 import { rememberRun, useConfig, useMedia } from '../lib/store'
 import { pagesLine, useWalk, walkStore, type WalkState } from '../lib/walk'
 import { AmountFix, ClaimStrip, LeadFix, StageFix } from '../components/Evidence'
-import { LeadDetail, LeadList, type Tab } from '../components/Leads'
+import { Answer } from '../components/Answer'
+import { LeadDetail, LeadList, useSays, type Tab } from '../components/Leads'
 import { Verdicts } from '../components/Verdicts'
 import { WalkGraph } from '../components/WalkGraph'
 import { CopyButton, Count, Icon, Mark, N, NamesProvider, useCopy } from '../components/ui'
 
 const permalink = (runId: string) => `${location.origin}/r/${runId}`
+// Hooks need a result to read before there is one.
+const NO_RESULT = { run_id: '', leads: [] } as unknown as Result
 
 function ExportMenu({ result }: { result: Result }) {
   const [open, setOpen] = useState(false)
@@ -125,8 +128,9 @@ function Tally({ walk }: { walk: WalkState }) {
 /**
  * The page check as a step of the walk. While the pages are being read it shows one mark per round; when they are
  * read, one mark per lead claim. Once the walk is done the line opens what the pages changed in this run.
+ * `shown`: how many corrections stay on the page while the rest is folded (the result opens on them).
  */
-function PageStep({ walk, result }: { walk: WalkState; result: Result | null }) {
+function PageStep({ walk, result, shown = 0 }: { walk: WalkState; result: Result | null; shown?: number }) {
   const [open, setOpen] = useState(false)
   const p = walk.pages
   const walking = walk.phase === 'walking'
@@ -179,25 +183,43 @@ function PageStep({ walk, result }: { walk: WalkState; result: Result | null }) 
         )}
         {pc && <Link className="link pagestep__all" href="/audit">Every check</Link>}
       </div>
+      {!open && pc && shown > 0 && leads.length > 0 && (
+        <div className="pagestep__panel pagestep__panel--first">
+          <h3>Another lead on the page<N>{leads.length}</N></h3>
+          <ul className="finds finds--cols">
+            {leads.slice(0, shown).map((f) => f.kind === 'lead' && <LeadFix key={`${f.round}:${f.cala}`} row={f} />)}
+          </ul>
+          {findings.length > Math.min(shown, leads.length) && (
+            <button type="button" className="pagestep__more" aria-expanded="false" aria-controls="pagestep-panel" onClick={() => setOpen(true)}>
+              All {findings.length} changes
+              <Icon name="chevron" size={13} />
+            </button>
+          )}
+        </div>
+      )}
       {open && pc && (
         <div className="pagestep__panel" id="pagestep-panel">
           {leads.length > 0 && (
             <>
               <h3>Another lead on the page<N>{leads.length}</N></h3>
-              <ul className="finds">{leads.map((f) => f.kind === 'lead' && <LeadFix key={`${f.round}:${f.cala}`} row={f} />)}</ul>
+              <ul className="finds finds--cols">{leads.map((f) => f.kind === 'lead' && <LeadFix key={`${f.round}:${f.cala}`} row={f} />)}</ul>
             </>
           )}
-          {amounts.length > 0 && (
-            <>
-              <h3>Amounts set aside<N>{amounts.length}</N></h3>
-              <ul className="finds finds--rows">{amounts.map((f) => f.kind === 'amount' && <AmountFix key={f.round} row={f} />)}</ul>
-            </>
-          )}
-          {stages.length > 0 && (
-            <>
-              <h3>Stage labels<N>{stages.length}</N></h3>
-              <ul className="finds finds--rows">{stages.map((f) => f.kind === 'stage' && <StageFix key={f.round} row={f} />)}</ul>
-            </>
+          {(amounts.length > 0 || stages.length > 0) && (
+            <div className="pagestep__cols">
+              {amounts.length > 0 && (
+                <div>
+                  <h3>Amounts set aside<N>{amounts.length}</N></h3>
+                  <ul className="finds finds--rows">{amounts.map((f) => f.kind === 'amount' && <AmountFix key={f.round} row={f} />)}</ul>
+                </div>
+              )}
+              {stages.length > 0 && (
+                <div>
+                  <h3>Stage labels<N>{stages.length}</N></h3>
+                  <ul className="finds finds--rows">{stages.map((f) => f.kind === 'stage' && <StageFix key={f.round} row={f} />)}</ul>
+                </div>
+              )}
+            </div>
           )}
           <p className="faint pagestep__tail">
             {pc.unread > 0 ? `${plural(pc.unread, 'claim')} could not be checked: the page did not open or is about something else. ` : ''}
@@ -290,6 +312,10 @@ export function Run() {
   const urlLead = useMemo(() => new URLSearchParams(search).get('lead'), [search])
   const selectedKey = urlLead && all.some((l) => l.key === urlLead) ? urlLead : wide ? (all[0]?.key ?? null) : null
   const selected = all.find((l) => l.key === selectedKey) ?? null
+
+  const settled = !walk.deep
+  const saysFor = useSays(result ?? NO_RESULT, done && settled)
+  const first = result ? (result.leads[0] ?? result.second_ring[0] ?? null) : null
 
   const select = useCallback(
     (key: string | null) => {
@@ -408,14 +434,39 @@ export function Run() {
     })
   }
 
+  /** From the answer on top into the lead itself, on the tab asked for. */
+  const openLead = (key: string, t: Tab) => {
+    setTab(t)
+    select(key)
+    if (wide) requestAnimationFrame(() => leadsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+
   const onRowSelect = (key: string, byKeyboard: boolean) => {
     select(key)
     if (wide && byKeyboard) requestAnimationFrame(() => detailRef.current?.querySelector<HTMLElement>('.detail')?.focus({ preventScroll: true }))
   }
 
+  // A finished walk opens on the answer; what it was asked and how much it read move below it, with the graph.
+  const answered = done && !!result && !!first
+  const meta = (
+    <div className="run__meta">
+      <p className="run__query">
+        {softNames.map((n) => (
+          <span key={n} className="q">
+            <i className="q__ring" aria-hidden="true" />
+            <span className="truncate" title={n}>{n}</span>
+          </span>
+        ))}
+        {stageName && <span className="tag">{stageName}</span>}
+        {companyName && <span className="faint truncate">for {companyName}</span>}
+      </p>
+      {!(stopped && walk.counters.calls === 0) && <Tally walk={walk} />}
+    </div>
+  )
+
   return (
     <NamesProvider result={result}>
-      <main className="page run">
+      <main className={`page run${answered ? ' is-answered' : ''}`}>
         <header className="run__head">
           <Headline walk={walk} />
           <div className="run__actions">
@@ -444,19 +495,7 @@ export function Run() {
           </div>
         </header>
 
-        <div className="run__meta">
-          <p className="run__query">
-            {softNames.map((n) => (
-              <span key={n} className="q">
-                <i className="q__ring" aria-hidden="true" />
-                <span className="truncate" title={n}>{n}</span>
-              </span>
-            ))}
-            {stageName && <span className="tag">{stageName}</span>}
-            {companyName && <span className="faint truncate">for {companyName}</span>}
-          </p>
-          {!(stopped && walk.counters.calls === 0) && <Tally walk={walk} />}
-        </div>
+        {!answered && meta}
 
         {walk.deep && !stopped && (
           <p className="deepline" role="status">
@@ -474,7 +513,15 @@ export function Run() {
           </p>
         ))}
 
-        {!stopped && <PageStep walk={walk} result={result} />}
+        {!stopped && !answered && <PageStep walk={walk} result={result} />}
+
+        {answered && result && first && (
+          <Answer lead={first} result={result} says={saysFor(first)} settled={settled} onOpen={(t) => openLead(first.key, t)} onOpenOther={(k) => openLead(k, 'record')}>
+            <PageStep walk={walk} result={result} shown={3} />
+          </Answer>
+        )}
+
+        {answered && meta}
 
         {!stopped && (
           <section className="run__graph" aria-label="The walk through Cala's funding graph">
@@ -517,7 +564,7 @@ export function Run() {
                   </p>
                 )}
                 <div className="md-split">
-                  <LeadList result={result} selected={selectedKey} onSelect={onRowSelect} />
+                  <LeadList result={result} selected={selectedKey} onSelect={onRowSelect} settled={!walk.deep} />
                   {wide && selected && (
                     <div className="md-split__detail" ref={detailRef}>
                       <LeadDetail lead={selected} result={result} tab={tab} onTab={setTab} />

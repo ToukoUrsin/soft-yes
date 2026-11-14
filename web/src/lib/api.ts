@@ -63,6 +63,8 @@ export interface Evidence extends RoundBrief {
   date_is_report: boolean
   with: string[]
   with_keys: string[]
+  /** Parallel to `with`: does a page about the round name that investor? false: Cala lists it, the page does not. */
+  with_on_page?: (boolean | null)[]
   co_leads: string[]
   investors: number | null
   relation?: Relation
@@ -134,7 +136,12 @@ export interface Lead {
   /** Cala's record under this name looks like a different company. */
   wrong_entity?: boolean
   doubt?: Doubt | null
+  /** One sentence from the investor's own site, word for word, and what it did in Cala. Absent on a walk that just ended. */
+  says?: SaysLine | null
 }
+
+export interface SaysLine { quote: string; topic: string; url: string; site: string; did: string }
+export interface SaysTop { run_id: string; items: { key: string; name: string; says: SaysLine | null; reason?: string | null }[] }
 
 export interface Doubt { founded?: number | null; round_year?: number | null; description?: string | null; text: string }
 
@@ -187,6 +194,9 @@ interface FindingBase { round: string; company: string; stage_name: string | nul
 export interface ConfirmedRow extends FindingBase { kind: 'confirmed'; cala: string; quote: string; url: string; publisher: string | null }
 export interface LeadFinding extends FindingBase {
   kind: 'lead'; cala: string; page: string[]; quote: string | null; url: string | null; publisher: string | null; other_round?: string | null
+  /** Set when the page is from another time than Cala's date for the round: `date` is then the page's. */
+  cala_date?: string | null
+  note?: string | null
 }
 export interface AmountFinding extends FindingBase { kind: 'amount'; amount: number; currency: string | null; pages: string[] }
 export interface StageFinding extends FindingBase { kind: 'stage'; cala: string; page: string | null; pages: string[] }
@@ -246,6 +256,8 @@ export interface Result {
     stage_usual?: { stage: string; stage_name: string; rounds: number; of: number } | null
   }
   headline: string
+  /** pick: one first lead. tie: two that Cala's record cannot tell apart. list: too few rounds to rank. */
+  start?: { mode: 'pick' | 'tie' | 'list' | 'none'; keys: string[]; followed: number }
   soft_yeses: SoftYes[]
   leads: Lead[]
   second_ring: Lead[]
@@ -338,6 +350,8 @@ export interface Draft {
   fallback: boolean
   chars: number
   note: string
+  /** What the model's first draft added that is in no fact: names, numbers, dates. Code caught them and the draft was dropped. */
+  rejected?: string[]
 }
 
 export interface Says {
@@ -359,37 +373,6 @@ export interface Says {
   }
 }
 
-export interface ConflictCompany {
-  id: string
-  name: string
-  description: string | null
-  website: string | null
-  industries: string[]
-  shared_industries: string[]
-  stage: string | null
-  sources: Source[]
-}
-export interface Conflicts {
-  available: boolean
-  reason: string | null
-  portfolio_size: number
-  about?: string
-  company: { id: string; name: string; description: string | null; industries: { id: string; name: string }[] } | null
-  checked: ConflictCompany[]
-  overlaps: ConflictCompany[]
-  note?: string
-}
-
-export interface AskAnswer {
-  available: boolean
-  question: string
-  reason?: string
-  answer?: string | null
-  steps?: { content: string | null; facts: { id?: string; content: string | null; origins: { publisher: string; url: string }[] }[] }[]
-  facts?: number
-  entities?: { id: string; name: string }[]
-}
-
 export interface SlushInfo {
   events_checked: number
   events: {
@@ -407,19 +390,6 @@ export interface SlushInfo {
   source: { publisher: string; url: string } | null
   attending?: AtSlush | null
   directory?: { connected: boolean; firms: number; people: number }
-}
-
-export interface References {
-  lead: string
-  companies_checked: number
-  references: {
-    company: Issuer
-    round: { id: string; stage_name: string | null; date: string | null; amount: number | null; currency: string | null }
-    round_sources: Source[]
-    people: { id: string; name: string; role: string; sources: Source[] }[]
-  }[]
-  unnamed: string[]
-  people: number
 }
 
 /** One company's rounds in Cala, each lead claim next to what the cited page says. */
@@ -456,7 +426,7 @@ export class ApiError extends Error {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const RETRY_MS = [400, 1200, 2500]
+const RETRY_MS = [400, 1200, 2500, 4000, 6000]
 export const OFFLINE = 'No connection to Soft Yes right now. Check your network and try again.'
 
 /** Every call is a read or repeats safely, so a dropped connection or a gateway hiccup is retried quietly. */
@@ -523,14 +493,9 @@ export const api = {
     }),
   says: (runId: string, leadKey: string, signal?: AbortSignal) =>
     request<Says>(`/api/says?${qs({ run_id: runId, lead_key: leadKey })}`, { signal }),
-  conflicts: (runId: string, leadKey: string, companyId: string | null, about: string, signal?: AbortSignal) =>
-    request<Conflicts>(`/api/conflicts?${qs({ run_id: runId, lead_key: leadKey, company_id: companyId, about })}`, {
-      signal,
-    }),
-  ask: (runId: string, leadKey: string, q: string, signal?: AbortSignal) =>
-    request<AskAnswer>(`/api/ask?${qs({ run_id: runId, lead_key: leadKey, q })}`, { signal }),
-  references: (runId: string, leadKey: string, signal?: AbortSignal) =>
-    request<References>(`/api/references?${qs({ run_id: runId, lead_key: leadKey })}`, { signal }),
+  /** What each of the first five leads says on its own site, next to what it did. Slow the first time: it reads their sites. */
+  saysTop: (runId: string, signal?: AbortSignal) =>
+    request<SaysTop>(`/api/says/top?${qs({ run_id: runId })}`, { signal }),
   slush: (runId: string, leadKey: string, signal?: AbortSignal) =>
     request<SlushInfo>(`/api/slush?${qs({ run_id: runId, lead_key: leadKey })}`, { signal }),
 }

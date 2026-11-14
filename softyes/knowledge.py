@@ -55,10 +55,28 @@ def _stage(text: str) -> str | None:
     return None
 
 
+INSIDE_A_NAME = re.compile(r"^(research|company|co\b|sons|partners|associates|development|innovation|climate|more)", re.I)
+
+
+def _ampersand(piece: str) -> list[str]:
+    """'Endeit Capital & DeepTech & Climate Fonds' is two investors, 'B & C Holding' is one. An "&" after a single
+    word, or before a word that only ends a name, sits inside the name; any other "&" parts two names."""
+    parts = [p.strip() for p in re.split(r"\s+&\s+", piece) if p.strip()]
+    out: list[str] = []
+    glue = False
+    for p in parts:
+        if out and (glue or INSIDE_A_NAME.match(p)):
+            out[-1] += " & " + p
+        else:
+            out.append(p)
+        glue = len(out[-1].split()) == 1   # one word so far ("DeepTech", "B"): the next part belongs to it
+    return out
+
+
 def _leads(text: str, own: str) -> list[str]:
     text = re.sub(r"\([^)]*\)", "", text)
     out = []
-    for part in re.split(r",|;|\s+and\s+|\s+&\s+|/", text):
+    for part in (n for piece in re.split(r",|;|\s+and\s+|/", text) for n in _ampersand(piece)):
         name = re.sub(r"^(co-)?led by\s+", "", part.strip(), flags=re.I).strip(" .")
         if name.lower() in NOBODY or len(name) < 2 or len(name) > 60 or re.search(r"\b(likely|various|others?|existing)\b", name, re.I):
             continue
@@ -119,25 +137,63 @@ def verify(rows: list[dict], context: list[dict]) -> tuple[list[dict], int]:
                 srcs.append({"publisher": m.group(1) if m else (src.get("name") or "")[:60], "url": url,
                              "date": None, "rank": None, "title": (doc.get("name") or "")[:140]})
         if srcs:
-            passages.append((f" {_squash(k.get('content'))} ", srcs))
+            passages.append((f" {_squash(k.get('content'))} ", srcs, graph.fix_text(k.get("content") or "") or ""))
     kept, dropped = [], 0
     for r in rows:
         company = f" {_squash(r['company'])} "
-        found, named = [], []
-        for text, srcs in passages:
+        found, named, said = [], [], {}
+        for text, srcs, raw in passages:
             if company not in text or not re.search(r" (led|lead|leads|leading|co led) ", text):
                 continue
-            hit = [lead for lead in r["leads"] if f" {_squash(lead)} " in text]
-            if hit:
+            # is the page itself about this company? then "The round was led by X" needs no company in the sentence
+            about = any(company in f" {_squash(s.get('title'))} " or company in f" {_squash(re.sub(r'[-_/.]+', ' ', s['url']))} "
+                        for s in srcs)
+            for lead in r["leads"]:
+                if lead in said or f" {_squash(lead)} " not in text:
+                    continue
+                quote = _said(raw, lead, r["company"], about)
+                if not quote:
+                    continue   # both names somewhere in one passage is not a statement that one led the other's round
+                said[lead] = {"quote": quote, "url": srcs[0]["url"], "publisher": srcs[0]["publisher"]}
+                named.append(lead)
                 for s in srcs:
                     if not any(f["url"] == s["url"] for f in found):
                         found.append(s)
-                named += [h for h in hit if h not in named]
-        if not found:
+        if not named:
             dropped += 1
             continue
-        kept.append({**r, "leads": named, "sources": found[:4]})
+        kept.append({**r, "leads": named, "sources": found[:4], "said": said})
     return kept, dropped
+
+
+def _said(raw: str, lead: str, company: str, about: bool) -> str | None:
+    """The passage's own words that this lead led this company's round: a table row naming both, or a sentence that
+    names the lead next to a word for leading (and the company too, unless the page is about that company)."""
+    words = re.findall(r"[A-Za-z0-9åäöüéèñøæÅÄÖÜ]+", lead)
+    if not words:
+        return None
+    name = re.compile(r"(?<![A-Za-z0-9])" + r"[^A-Za-z0-9]{0,3}".join(map(re.escape, words)) + r"(?![A-Za-z0-9])", re.I)
+    co = f" {_squash(company).strip()} "
+    for part in raw.split("[...]"):   # Cala joins excerpts of one page with this mark: never quote across it
+        for line in part.split("\n"):
+            if not (3 <= line.count("|") <= 9) or len(line) > 400 or co not in f" {_squash(line)} ":
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|") if c.strip()]
+            # the cell that names it must itself say it led: "led by Mosaic Ventures", never a column we cannot see
+            if any(name.search(c) and LED_CELL.search(c) for c in cells):
+                return " · ".join(cells)
+        for m in name.finditer(part):
+            lo, hi = pagecheck._sentence(part, m.start())
+            sent = re.sub(r"\s+", " ", pagecheck.tidy(part[lo:hi])).strip(" |#*>")
+            at = name.search(sent)
+            if not at or not (30 <= len(sent) <= 420) or sent.count("|") > 1 or not pagecheck._says_led(sent, at.start(), at.end()):
+                continue
+            if co in f" {_squash(sent)} " or (about and not pagecheck._other_company(sent, company)):
+                return sent
+    return None
+
+
+LED_CELL = re.compile(r"(?:^|[\s(])(?:co-)?(?:led by|lead investors?|leads the|led the)\b")
 
 
 def round_id(row: dict) -> str:

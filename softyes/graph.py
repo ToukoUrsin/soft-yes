@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from .cala import Cala, Ledger
+from .cala import Cala, CalaError, Ledger
 
 # These bodies are sent to Cala verbatim; they are also the cache key, so do not reorder.
 INVESTOR_BODY = {"properties": ["name"], "relationships": {"outgoing": {
@@ -50,7 +50,16 @@ def norm(name: str) -> str:
     words = re.findall(r"[a-z0-9åäöüéèñøæ]+", (name or "").lower())
     while len(words) > 1 and words[-1] in LEGAL:
         words.pop()
-    return "".join(words)
+    key = "".join("fund" if w == "fonds" else w for w in words)   # "DeepTech & Climate Fonds" is the "... Fund"
+    return SHORT_FOR.get(key, key)
+
+
+# The initials an investor goes by, and its name in full: one investor, one key, and a page may write either.
+FULL_OF = {"nea": "New Enterprise Associates", "a16z": "Andreessen Horowitz", "yc": "Y Combinator", "usv": "Union Square Ventures",
+           "kpcb": "Kleiner Perkins", "gv": "Google Ventures", "htgf": "High-Tech Gründerfonds", "dtcf": "DeepTech & Climate Fund",
+           "lsvp": "Lightspeed Venture Partners", "ivp": "Institutional Venture Partners"}
+SHORT_FOR = {k: "".join(re.findall(r"[a-z0-9åäöüéèñøæ]+", v.lower())) for k, v in FULL_OF.items()} | \
+    {"kleinerperkinscaufieldbyers": "kleinerperkins"}
 
 
 FUND_WORDS = {"ventures", "venture", "capital", "partners", "vc", "fund", "funds", "investments", "investment", "invest",
@@ -116,7 +125,13 @@ def pretty(name: str) -> str:
         words = [w.upper() if w.lower() in ACRONYMS or (len(w) <= 3 and len(words) > 1 and w.isalpha() and n == 0)
                  else w.capitalize() for n, w in enumerate(words)]
     words = [CASING.get(w.lower(), w) for w in words]   # names a firm writes its own way, however Cala holds them
-    return " ".join(words).rstrip(",")
+    shown = " ".join(words).rstrip(",")
+    return IN_FULL.get(shown.lower(), shown)
+
+
+# Initials Cala sometimes files a firm under, and the name a founder would recognise.
+IN_FULL = {"nea": "New Enterprise Associates", "usv": "Union Square Ventures", "kpcb": "Kleiner Perkins",
+           "htgf": "High-Tech Gründerfonds", "dtcf": "DeepTech & Climate Fonds", "lsvp": "Lightspeed Venture Partners"}
 
 
 URL_DATE = re.compile(r"[/_-](20[0-2]\d)[/-](0[1-9]|1[0-2])(?:[/-](0[1-9]|[12]\d|3[01]))?(?=[/_-])")
@@ -185,9 +200,25 @@ def kind(entity_type: str | None) -> str:
     return "person" if entity_type == "Person" else "fund"
 
 
+def plain_name(name: str) -> str:
+    """A name as people write one: letters, digits and the few marks names carry. Markup and code are dropped, so a
+    pasted tag is searched as its words and never reaches Cala as it was typed."""
+    name = re.sub(r"<[^>]*>", " ", name or "")
+    name = re.sub(r"[^\w .&'’+,()/@!-]", " ", name)
+    return re.sub(r"\s+", " ", name).strip()[:80]
+
+
 async def search(cala: Cala, name: str, ledger: Ledger | None = None, limit: int = 8, cache_only: bool = False):
-    resp = await cala.call("GET", "/entities", params={"name": name, "limit": limit}, ledger=ledger,
-                           cache_only=cache_only)
+    name = plain_name(name)
+    if len(name) < 2:
+        return []
+    try:
+        resp = await cala.call("GET", "/entities", params={"name": name, "limit": limit}, ledger=ledger,
+                               cache_only=cache_only)
+    except CalaError as exc:
+        if exc.status in (400, 403, 404, 422):   # Cala refuses the name: it knows nothing by it
+            return []
+        raise
     if resp is None:
         return []
     keep = {"Company", "Organization", "Person"}

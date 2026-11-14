@@ -1,13 +1,9 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
-import {
-  api, type AskAnswer, type Conflicts as ConflictsData, type ConflictCompany, type Draft, type DraftKind, type Lead,
-  type References as ReferencesData, type Result, type Says, type SlushInfo,
-} from '../lib/api'
-import { capped, fmtEventTime, fmtMoney, fmtMonth, host, plural, possessive } from '../lib/format'
+import { api, type Draft, type DraftKind, type Lead, type Result, type Says, type SlushInfo } from '../lib/api'
+import { capped, fmtEventTime, host, plural, possessive } from '../lib/format'
 import { useConfig, useFounder, useSessionState } from '../lib/store'
 import { Deal } from './Deal'
-import { Markdown } from './Markdown'
-import { CopyButton, Icon, N, Segmented, Sources, useCopy } from './ui'
+import { CopyButton, Icon, N, Segmented, useCopy } from './ui'
 
 interface Props { lead: Lead; result: Result }
 
@@ -121,15 +117,21 @@ function WithBlanks({ text }: { text: string }) {
   return <>{parts.map((p, i) => (/^\[[^\]]+\]$/.test(p) ? <mark key={i} className="blank">{p.slice(1, -1)}</mark> : p))}</>
 }
 
-function FounderFields({ result }: { result: Result }) {
+/** The founder's lines, with the company the walk was started for filled in once. */
+export function useRunFounder(result: Result) {
   const [founder, update] = useFounder()
-  const stage = result.input.stage_name
   useEffect(() => {
     const name = result.input.company?.name
     if (name && !founder.company) update({ company: name })
     // only when the run changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result.run_id])
+  return [founder, update] as const
+}
+
+function FounderFields({ result }: { result: Result }) {
+  const [founder, update] = useRunFounder(result)
+  const stage = result.input.stage_name
   return (
     <div className="founder">
       <label>
@@ -148,7 +150,13 @@ function FounderFields({ result }: { result: Result }) {
   )
 }
 
-export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
+/**
+ * One draft. With `onChange` it is the short form the result page opens on: the message, its note and Copy, with a way
+ * into the form. `wait` holds the fetch while the walk may still change who the message is about.
+ */
+export function DraftPane({
+  lead, result, kind, onChange, wait = false,
+}: Props & { kind: DraftKind; onChange?: () => void; wait?: boolean }) {
   const [founder] = useFounder()
   const config = useConfig()
   const settled = useDebounced(founder, 700)
@@ -161,7 +169,7 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
   const [subjectCopied, copySubject] = useCopy()
 
   useEffect(() => {
-    if (gemini == null) return
+    if (gemini == null || wait) return
     const hit = drafts.get(key)
     if (hit?.final) {
       setState({ draft: hit.draft, phrasing: false, error: null })
@@ -169,7 +177,8 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
     }
     const ctl = new AbortController()
     let live = true
-    setState((s) => ({ draft: hit?.draft ?? (s.draft?.kind === kind ? s.draft : null), phrasing: false, error: null }))
+    // Never the last draft under new inputs: a reader takes whatever text is on the page as the answer.
+    setState({ draft: hit?.draft ?? null, phrasing: false, error: null })
     const body = { run_id: result.run_id, lead_key: lead.key, kind, founder: settled }
     ;(async () => {
       try {
@@ -194,13 +203,22 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
     }
     // founder fields are part of `key`
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, gemini, attempt])
+  }, [key, gemini, attempt, wait])
 
-  const d = state.draft
-  if (state.error && !d) return <Failed error={state.error} onRetry={retry} />
+  // Typed, not yet sent: what is on the page was written for the old words.
+  const typing = founder.company !== settled.company || founder.one_liner !== settled.one_liner || founder.raising !== settled.raising
+  const d = typing ? null : state.draft
+  if (state.error && !d && !typing) return <Failed error={state.error} onRetry={retry} />
   if (!d) {
+    const yours = founder.company || founder.one_liner || founder.raising
     return (
-      <div className="draft draft--loading" aria-label="Writing the draft" role="status">
+      <div className="draft draft--loading" role="status" aria-live="polite">
+        <p className="draft__writing">
+          <i className="spinner" aria-hidden="true" />
+          {wait
+            ? 'Still reading. The message is written when the shortlist has settled.'
+            : yours ? `Writing ${kind === 'slush' ? 'the note' : 'the message'} with what you typed` : `Writing ${kind === 'slush' ? 'the note' : 'the message'} from Cala’s facts`}
+        </p>
         <i className="skel" style={{ width: '38%', height: 14 }} />
         <i className="skel" style={{ width: '92%', height: 14 }} />
         <i className="skel" style={{ width: '84%', height: 14 }} />
@@ -215,6 +233,14 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
   const blanks = open.length > 0
   const inSubject = open.some((b) => d.subject.includes(b))
   const yours = d.yours ?? []
+  // The model's first try, when code threw it out: the sentence about it leaves the note and gets its own line.
+  const rejected = d.rejected ?? []
+  const at = rejected.length ? d.note.indexOf('dropped: it added') : -1
+  const cut = at >= 0 ? d.note.lastIndexOf('. ', at) + 1 : -1
+  const whole = cut >= 0 ? d.note.slice(0, cut).trim() : d.note
+  // The server's note points at the fact lines "below"; the short form does not list them.
+  const note = onChange ? whole.replace(/ below\b/g, '') : whole
+  const droppedLead = at >= 0 ? d.note.slice(cut, at + 'dropped: it added'.length).trim() : 'A draft was dropped: it added'
   return (
     <div className="draft">
       <div className="draft__paper" key={`${d.model ?? 'template'}:${d.body.length}`}>
@@ -242,7 +268,7 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
               <>
                 <Icon name="check" size={14} />
                 {d.checked ? 'Checked against the facts. ' : ''}
-                {d.note}
+                {note}
               </>
             )}
           </span>
@@ -251,7 +277,14 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
               {d.chars} / {limit}
             </span>
           )}
-          {blanks ? (
+          {onChange && (
+            <button type="button" className="link draft__change" onClick={onChange}>
+              Change it
+            </button>
+          )}
+          {onChange ? (
+            <CopyButton text={d.body} label="Copy message" className={blanks ? 'btn' : 'btn btn--primary'} />
+          ) : blanks ? (
             <span className="draft__fill">
               Fill in {open.map((b, i) => (
                 <span key={b}>
@@ -265,7 +298,22 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
           )}
         </div>
       </div>
-      <div className="draft__facts">
+      {rejected.length > 0 && !state.phrasing && (
+        <p className="draft__dropped">
+          <Icon name="x" size={13} />
+          <span>
+            {droppedLead}{' '}
+            {rejected.map((w, i) => (
+              <span key={w}>
+                {i > 0 && ', '}
+                <mark>{w}</mark>
+              </span>
+            ))}
+            . <span className="faint">{onChange ? 'Code caught it, not a model.' : 'Code caught it, not a model: none of that is in the lines below.'}</span>
+          </span>
+        </p>
+      )}
+      {!onChange && <div className="draft__facts">
         <h4>
           <Icon name="check" size={13} />
           From Cala, checked<N>{d.facts.length}</N>
@@ -291,7 +339,7 @@ export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
         <p className="faint">
           The draft may use these lines and nothing else. One that adds a name, number or date is thrown away.
         </p>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -441,206 +489,12 @@ export function SaysDid({ lead, result }: Props) {
   )
 }
 
-// --------------------------------------------------------------------------------------- conflicts
-
-/** Cala's stage ids read as enums ("SERIES_A"); say them the way a founder would. */
-function stageWord(id: string): string {
-  const w = id.toLowerCase().replace(/_/g, ' ')
-  return w === 'pre seed' ? 'Pre-seed' : w.replace(/^./, (c) => c.toUpperCase()).replace(/ ([a-z])$/, (_, c: string) => ` ${c.toUpperCase()}`)
-}
-
-function Company({ c }: { c: ConflictCompany }) {
-  return (
-    <li className="co">
-      <div className="co__head">
-        <span className="co__name">{c.name}</span>
-        {c.stage && <span className="faint">{stageWord(c.stage)}</span>}
-        <Sources sources={c.sources} max={2} />
-      </div>
-      {c.description && <p className="muted">{c.description}</p>}
-      {(c.shared_industries.length > 0 || c.industries.length > 0) && (
-        <p className="co__tags">
-          {c.shared_industries.map((i) => (
-            <span key={i} className="tag tag--warn" title="An industry Cala lists for your company too">{i}</span>
-          ))}
-          {c.industries.filter((i) => !c.shared_industries.includes(i)).slice(0, 4).map((i) => (
-            <span key={i} className="tag">{i}</span>
-          ))}
-        </p>
-      )}
-    </li>
-  )
-}
-
-export function Conflicts({ lead, result }: Props) {
-  const [founder] = useFounder()
-  const company = result.input.company?.id ? result.input.company : null
-  const [about, setAbout] = useState(founder.one_liner)
-  const [asked, setAsked] = useSessionState<string>(`softyes:conflict:${result.run_id}:${lead.key}`, '')
-  const subject = company?.id ?? asked
-  const od = useOnDemand<ConflictsData>(`conflicts:${result.run_id}:${lead.key}:${subject}`, () =>
-    api.conflicts(result.run_id, lead.key, company?.id ?? null, company ? '' : subject),
-  )
-  // The check goes through the companies the walk listed, so that is the number it states.
-  const size = lead.portfolio.length || (lead.pulse?.portfolio_size ?? 0)
-  useAutoRun(od, !company && !!asked)
-
-  if (!size) {
-    return <p className="state">Cala lists no portfolio companies for {lead.name}, so there is nothing to check against.</p>
-  }
-  if (od.status === 'loading') {
-    return (
-      <Working
-        seconds={od.seconds}
-        steps={[[0, `Going through ${plural(size, 'portfolio company', 'portfolio companies')}`], [5, 'Opening the ones closest to you in Cala'], [20, 'Still opening them']]}
-        hint="Descriptions and industries come from Cala. Gemini only picks which companies to open."
-      />
-    )
-  }
-  if (od.status === 'error') return <Failed error={od.error} onRetry={od.run} />
-  if (od.status === 'done' && od.data) {
-    const c = od.data
-    const rest = c.checked.filter((x) => !c.overlaps.some((o) => o.id === x.id))
-    return (
-      <div className="conf">
-        {!c.available ? (
-          <p className="state">{c.reason}</p>
-        ) : c.overlaps.length > 0 ? (
-          <>
-            <p className="conf__lede">
-              <b>{plural(c.overlaps.length, 'portfolio company', 'portfolio companies')}</b> of {lead.name} {c.overlaps.length === 1 ? 'shares' : 'share'} an
-              industry with {c.company?.name ?? 'your company'} in Cala. Worth raising before you pitch.
-            </p>
-            <ul className="cos">{c.overlaps.map((x) => <Company key={x.id} c={x} />)}</ul>
-          </>
-        ) : !c.company && c.checked.length > 0 ? (
-          <p className="conf__lede">
-            <b>{plural(c.checked.length, 'portfolio company', 'portfolio companies')}</b> of {lead.name} {c.checked.length === 1 ? 'looks' : 'look'} closest
-            to what you described. <span className="muted">Read {c.checked.length === 1 ? 'it' : 'them'} and judge: a description alone gives Cala no industry to match on.</span>
-          </p>
-        ) : (
-          <p className="conf__lede">
-            {c.checked.length > 0
-              ? `Cala lists no shared industry between ${c.company?.name ?? 'your company'} and the ${plural(c.checked.length, 'portfolio company', 'portfolio companies')} opened.`
-              : (c.reason ?? 'No portfolio company looked close enough to open.')}{' '}
-            <span className="muted">That is not proof there is no competitor: Cala lists {plural(c.portfolio_size, 'company', 'companies')} for {lead.name}.</span>
-          </p>
-        )}
-        {rest.length > 0 && (
-          <>
-            <h4>{c.overlaps.length ? 'Also opened, no shared industry' : c.company ? 'The closest ones, opened' : 'Opened in Cala'}</h4>
-            <ul className="cos">{rest.map((x) => <Company key={x.id} c={x} />)}</ul>
-          </>
-        )}
-        {c.note && <p className="faint conf__note">{c.note}</p>}
-        {!company && (
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setAsked('')}>
-            Check a different description
-          </button>
-        )}
-      </div>
-    )
-  }
-  if (company) {
-    return (
-      <Start action={`Check against ${company.name}`} onRun={od.run} time="About 10 seconds">
-        Does {lead.name} already back someone in your space? This goes through its {plural(size, 'portfolio company', 'portfolio companies')} in
-        Cala and opens the ones closest to {company.name}.
-      </Start>
-    )
-  }
-  const submit = () => {
-    const text = about.trim()
-    if (text.length < 8) return
-    setAsked(text)
-  }
-  return (
-    <form
-      className="ondemand"
-      onSubmit={(e) => {
-        e.preventDefault()
-        submit()
-      }}
-    >
-      <p>
-        Does {lead.name} already back someone in your space? Say what your company does and this goes through its{' '}
-        {plural(size, 'portfolio company', 'portfolio companies')} in Cala.
-      </p>
-      <label>
-        <span className="field-label">What your company does</span>
-        <input name="about" className="input" value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Planning software for bulk shipping" maxLength={240} />
-      </label>
-      <div className="ondemand__go">
-        <button type="submit" className="btn" disabled={about.trim().length < 8}>Check its portfolio</button>
-        <span className="faint">About 10 seconds. Pick your company on the start page to match on Cala’s own industries.</span>
-      </div>
-    </form>
-  )
-}
-
 /** The form sets what to ask; the fetch starts once there is something to ask about. */
 function useAutoRun(od: { status: string; run: () => void }, when: boolean) {
   useEffect(() => {
     if (when && od.status === 'idle') od.run()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [when, od.status])
-}
-
-// -------------------------------------------------------------------------------------- references
-
-export function References({ lead, result }: Props) {
-  const od = useOnDemand<ReferencesData>(`refs:${result.run_id}:${lead.key}`, () => api.references(result.run_id, lead.key))
-  if (od.status === 'idle') {
-    return (
-      <Start action="Find founders to call" onRun={od.run} time="A few seconds">
-        Before you take a lead’s money, talk to founders it has already led. This looks up who founded or runs the companies
-        behind {possessive(lead.name)} latest led rounds, each with the page that names them.
-      </Start>
-    )
-  }
-  if (od.status === 'loading') {
-    return <Working seconds={od.seconds} steps={[[0, 'Opening the companies it led most recently'], [8, 'Reading who founded them']]} hint="Names come from Cala with their source." />
-  }
-  if (od.status === 'error' || !od.data) return <Failed error={od.error} onRetry={od.run} />
-  const r = od.data
-  if (!r.references.length) {
-    return (
-      <p className="state">
-        Cala names no founder or chief executive for the {plural(r.companies_checked, 'company', 'companies')} {lead.name} led most recently
-        {r.unnamed.length ? ` (${r.unnamed.join(', ')})` : ''}.
-      </p>
-    )
-  }
-  return (
-    <div className="refs">
-      <p className="conf__lede">
-        {plural(r.people, 'founder')} at {plural(r.references.length, 'company', 'companies')} {lead.name} led. Ask them how it behaves after the round closes.
-      </p>
-      <ul className="refs__list">
-        {r.references.map((x) => (
-          <li key={x.company.id}>
-            <div className="refs__co">
-              <span className="co__name">{x.company.name}</span>
-              <span className="muted">
-                {[x.round.stage_name && x.round.stage_name !== 'Round' ? x.round.stage_name : '', fmtMoney(x.round.amount, x.round.currency), fmtMonth(x.round.date)].filter(Boolean).join(', ')}
-              </span>
-              <Sources sources={x.round_sources} max={1} />
-            </div>
-            <ul className="refs__people">
-              {x.people.map((p) => (
-                <li key={p.id}>
-                  <span>{p.name}</span>
-                  <span className="faint">{p.role}</span>
-                  <Sources sources={p.sources} max={1} />
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
-      {r.unnamed.length > 0 && <p className="faint">Cala names nobody at {r.unnamed.join(', ')}.</p>}
-    </div>
-  )
 }
 
 // ------------------------------------------------------------------------------------------- slush
@@ -659,7 +513,7 @@ export function Slush({ lead, result }: Props) {
   return (
     <div className="slush">
       <div className="slush__top">
-        <p className="conf__lede">
+        <p className="slush__lede">
           {at ? (
             <>
               <b>{plural(at.people, 'person', 'people')}</b> from {at.firm} {at.people === 1 ? 'is' : 'are'} registered for Slush
@@ -711,107 +565,6 @@ export function Slush({ lead, result }: Props) {
         </p>
       )}
 
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------------------- ask cala
-
-export function AskCala({ lead, result }: Props) {
-  const stage = result.input.stage_name
-  const suggestions = [
-    `Which funding rounds has ${lead.name} led most recently?`,
-    stage ? `Does ${lead.name} lead ${stage} rounds, and how large are they?` : `What stage does ${lead.name} usually lead at?`,
-    `Who are the partners at ${lead.name}?`,
-  ]
-  const [q, setQ] = useState('')
-  const [asked, setAsked] = useSessionState<string>(`softyes:ask:${result.run_id}:${lead.key}`, '')
-  const od = useOnDemand<AskAnswer>(`ask:${result.run_id}:${lead.key}:${asked}`, () => api.ask(result.run_id, lead.key, asked))
-  useAutoRun(od, !!asked)
-  const ask = (text: string) => {
-    const t = text.trim()
-    if (t.length < 6) return
-    setQ(t)
-    setAsked(t)
-  }
-  const a = od.data
-  return (
-    <div className="ask">
-      <form
-        className="ask__form"
-        onSubmit={(e) => {
-          e.preventDefault()
-          ask(q)
-        }}
-      >
-        <label className="sr-only" htmlFor="ask-q">Ask Cala about {lead.name}</label>
-        <input id="ask-q" name="question" className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Ask Cala about ${lead.name}`} maxLength={300} autoComplete="off" />
-        <button type="submit" className="btn" disabled={q.trim().length < 6 || od.status === 'loading'}>Ask</button>
-      </form>
-      {od.status !== 'loading' && (
-        <ul className="ask__ideas">
-          {suggestions.filter((s) => s !== asked).map((s) => (
-            <li key={s}>
-              <button type="button" onClick={() => ask(s)}>
-                <span>{s}</span>
-                <Icon name="arrow" size={14} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {!asked && (
-        <p className="faint ask__note">
-          Cala answers from its own graph and shows the steps and sources behind the answer. It takes 10 to 50 seconds.
-        </p>
-      )}
-      {asked && od.status === 'loading' && (
-        <Working
-          seconds={od.seconds}
-          steps={[[0, 'Cala is searching its graph'], [12, 'Cala is reasoning over what it found'], [35, 'Still working. Long answers take up to a minute.']]}
-          hint={asked}
-        />
-      )}
-      {asked && od.status === 'error' && <Failed error={od.error} onRetry={od.run} />}
-      {asked && od.status === 'done' && a && (
-        <div className="ask__answer">
-          <p className="ask__q">{a.question}</p>
-          {!a.available || !a.answer ? (
-            <p className="state">{a.reason ?? 'Cala gave no answer to that.'}</p>
-          ) : (
-            <>
-              <Markdown text={a.answer} />
-              {a.steps && a.steps.length > 0 && (
-                <details className="ask__steps" open={a.steps.length <= 4}>
-                  <summary>
-                    <Icon name="chevron" size={14} />
-                    How Cala got there
-                    <span className="count num">{plural(a.steps.length, 'step')}{a.facts ? `, ${plural(a.facts, 'fact')}` : ''}</span>
-                  </summary>
-                  <ol>
-                    {a.steps.map((s, i) => (
-                      <li key={i}>
-                        {s.content && <Markdown text={s.content} />}
-                        {s.facts.length > 0 && (
-                          <ul className="ask__facts">
-                            {s.facts.map((f, j) => (
-                              <li key={f.id ?? j}>
-                                <span>{f.content}</span>
-                                <Sources sources={f.origins.map((o) => ({ publisher: o.publisher, url: o.url }))} max={2} />
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
-                </details>
-              )}
-              <p className="faint ask__note">This answer and its sources are Cala’s own. Soft Yes adds nothing to it.</p>
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }

@@ -6,6 +6,8 @@ import difflib
 import collections
 import json
 import os
+import re
+import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -157,9 +159,44 @@ app = FastAPI(title="Soft Yes", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=800)  # event streams are left alone
 
 
+class Visitor:
+    """Names who is asking, so the Cala client can keep one visitor from spending everyone's credits. Only on the public
+    host (its proxy sends the caller's address); local work is not counted."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        headers = {k: v for k, v in scope["headers"]}
+        address = headers.get(b"fly-client-ip", b"").decode("latin1")
+        if not address:
+            return await self.inner(scope, receive, send)
+        m = re.search(r"(?:^|;\s*)sy_v=([A-Za-z0-9_-]{16,40})", headers.get(b"cookie", b"").decode("latin1"))
+        fresh = None if m else secrets.token_urlsafe(16)
+        token = cala_mod.VISITOR.set((m.group(1) if m else fresh, address))
+
+        async def reply(message):
+            if fresh and message["type"] == "http.response.start":
+                cookie = f"sy_v={fresh}; Path=/; Max-Age=2592000; SameSite=Lax; Secure".encode()
+                message = {**message, "headers": [*message.get("headers", []), (b"set-cookie", cookie)]}
+            await send(message)
+
+        try:
+            await self.inner(scope, receive, reply)
+        finally:
+            cala_mod.VISITOR.reset(token)
+
+
+app.add_middleware(Visitor)
+
+
 def _credits() -> dict:
     c = cala_mod.get()
-    return {"used": c.credits_used(), "cap": CREDIT_CAP, "cached_calls": c.total_cached()}
+    left = cala_mod.visitor_left()
+    return {"used": c.credits_used(), "cap": CREDIT_CAP, "cached_calls": c.total_cached(),
+            **({"yours_left_today": left, "yours_a_day": cala_mod.VISITOR_CAP} if left is not None else {})}
 
 
 @app.get("/api/config")
@@ -192,12 +229,13 @@ def _local_hits(q: str, limit: int) -> list[dict]:
     hits = []
     for e in INDEX.values():
         name = e["name"].lower()
+        parts = re.findall(r"[a-z0-9åäöüéèñøæ]+", name)
         if e["key"].startswith(nq):
             tier = 0
         elif all(any(w.startswith(x) for w in name.split()) for x in words):
             tier = 1
-        elif nq in e["key"] and len(nq) >= 4:
-            tier = 2
+        elif len(nq) >= 4 and any("".join(parts[n:]).startswith(nq) for n in range(1, len(parts))):
+            tier = 2   # what was typed starts a later word of the name, not the middle of one ("Lockheed MartIN VENTUREs")
         else:
             continue
         hits.append((tier, -e["rounds"], len(e["name"]), e))
@@ -238,8 +276,14 @@ def _families(hits: list[dict], limit: int, q: str = "") -> list[dict]:
                     "entities": [{"name": m["name"], "ids": m["ids"]} for m in members][:6]})
     nq = graph.norm(q)
     # the name as typed first, then the firm Cala knows best; a marketing agency called Seaya goes below Seaya Ventures
-    out.sort(key=lambda f: (not _investor_like(f), nq not in (f["key"], graph.root(f["name"])[0]),
-                            -(f["rounds"] + 3 * len(f["entities"])), len(f["name"])))
+    def place(f: dict) -> int:
+        typed = f["key"].startswith(nq) or (graph.root(f["name"])[0] or "").startswith(nq)
+        exact = nq in (f["key"], graph.root(f["name"])[0])
+        # an investor called what was typed, the exact name, a name that starts with it, then names that only contain it
+        return 0 if _investor_like(f) and exact else 1 if _investor_like(f) and typed else 2 if exact else 3 if typed else \
+            4 if _investor_like(f) else 5
+
+    out.sort(key=lambda f: (place(f), -(f["rounds"] + 3 * len(f["entities"])), len(f["name"])))
     return out[:limit]
 
 
@@ -253,9 +297,9 @@ NICKNAMES = {"a16z": "Andreessen Horowitz", "yc": "Y Combinator", "usv": "Union 
 
 
 def _nickname(q: str) -> str | None:
-    nq = graph.norm(q)
-    if nq in NICKNAMES:
-        return NICKNAMES[nq]
+    nq, typed = graph.norm(q), re.sub(r"[^a-z0-9]", "", q.lower())
+    if typed in NICKNAMES or nq in NICKNAMES:
+        return NICKNAMES.get(typed) or NICKNAMES[nq]
     return next((v for k, v in NICKNAMES.items() if len(nq) >= 7 and k.startswith(nq)), None)
 
 
@@ -388,6 +432,8 @@ def _annotate(result: dict) -> dict:
     """Mark who is registered for Slush. Done on read, so a stored run picks up the live directory."""
     for e in result["leads"] + result["second_ring"] + result["soft_yeses"]:
         e["at_slush"] = extras.at_slush(e["name"])
+    for e in result["leads"][:SAYS_TOP]:   # what the lead says on its own site, when it has been read already
+        e["says"] = extras.says_line(e)
     result["slush"] = {**extras.slush_directory(),
                        "leads_attending": sum(1 for e in result["leads"] if e["at_slush"])}
     return result
@@ -556,6 +602,31 @@ async def says(run_id: str, lead_key: str):
     return await _patient(extras.says(cala_mod.get(), lead))
 
 
+SAYS_TOP = 5   # the leads whose own site is read without being asked
+
+
+@app.get("/api/says/top")
+async def says_top(run_id: str):
+    """Says vs did for the first leads of a run, one line each: the fund's own sentence from its site (Oxylabs reads the
+    site, Gemini points at sentences, code keeps only those found on the page word for word) next to Cala's count."""
+    result = load_run(run_id)
+    if not result:
+        raise HTTPException(404, "No such run")
+    leads = result["leads"][:SAYS_TOP]
+
+    async def one(lead: dict) -> dict:
+        try:
+            got = await asyncio.wait_for(extras.says(cala_mod.get(), lead), 75)
+        except Exception as exc:  # noqa: BLE001  one slow or broken site must not hide the others
+            return {"key": lead["key"], "name": lead["name"], "says": None, "reason": f"{type(exc).__name__}"[:60]}
+        return {"key": lead["key"], "name": lead["name"], "says": extras.says_line(lead, got), "reason": got.get("reason")}
+
+    async def work() -> dict:
+        return {"run_id": run_id, "items": list(await asyncio.gather(*(one(e) for e in leads)))}
+
+    return await _patient(work())
+
+
 @app.get("/api/conflicts")
 async def conflicts(run_id: str, lead_key: str, company_id: str = "", about: str = ""):
     result, lead = _lead(run_id, lead_key)
@@ -654,7 +725,7 @@ async def check(q: str = "", id: str = ""):
 
 async def _check(q: str = "", id: str = "") -> dict:
     c = cala_mod.get()
-    q, matches = q.strip()[:80], []
+    q, matches = graph.plain_name(q), []
     name = ""
     try:
         if not id:

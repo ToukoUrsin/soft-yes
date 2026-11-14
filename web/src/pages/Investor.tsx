@@ -73,7 +73,8 @@ export function InvestorPage() {
         setState({ result: first, error: null })
         // A thin record is read further at the server: wait for the stored result and swap it in.
         let r = first
-        for (let i = 0; r.pending?.length && i < 60 && !ctl.signal.aborted; i++) {
+        // It settles in seconds when it works. After 45 the page stands as it is rather than saying "still reading" for good.
+        for (let i = 0; r.pending?.length && i < 18 && !ctl.signal.aborted; i++) {
           await new Promise((done) => setTimeout(done, 2500))
           try {
             const next = await api.run(first.run_id, ctl.signal)
@@ -125,6 +126,13 @@ export function InvestorPage() {
   const led = s.led_rounds ?? []
   const fixed = s.led_corrected ?? []
   const followed = s.followed_rounds ?? []
+  const reading = !!result.pending?.length
+  // The ledger counts what the calls returned. It can trail the rounds on the page, and must never say less than the page shows.
+  const shown = new Set([...led, ...fixed, ...followed].flatMap((r) => (r.sources ?? []).map((x) => x.url))).size
+  const ledger = result.ledger
+  const proof = shown > (ledger.sources ?? 0)
+    ? proofLine({ ...result, ledger: { ...ledger, sources: shown, facts: ledger.facts ? ledger.facts : undefined } })
+    : proofLine(result)
   const noLead = followed.filter((r) => !r.leads.filter((n) => n !== s.name).length).length
 
   // Replayed from this result: no new Cala calls.
@@ -139,7 +147,8 @@ export function InvestorPage() {
         <header className="inv__head">
           <div className="inv__title">
             <h1>{s.name}</h1>
-            <span className={tag.cls}>{tag.text}</span>
+            {/* No verdict while more is being read: the tag and the line under it must not disagree. */}
+            {!reading && <span className={tag.cls}>{tag.text}</span>}
           </div>
           {desc && <p className="inv__desc">{desc}</p>}
           {(site || profile?.hq) && (
@@ -155,7 +164,7 @@ export function InvestorPage() {
           )}
         </header>
 
-        {!!result.pending?.length && (
+        {reading && (
           <p className="deepline" role="status">
             <i className="spinner" aria-hidden="true" />
             <span>
@@ -193,7 +202,7 @@ export function InvestorPage() {
               </div>
               <div>
                 <dt>Followed</dt>
-                <dd className="num">{Math.max(s.followed ?? 0, followed.length)}</dd>
+                <dd className="num">{s.followed ?? 0}</dd>
               </div>
               {p && (
                 <div>
@@ -210,7 +219,8 @@ export function InvestorPage() {
             </dl>
             {s.capped && <p className="faint inv__cap">Cala returns 50 rounds at most, so the real counts are higher.</p>}
 
-            {p?.by_year?.length ? (
+            {/* Years with nothing in them draw an empty frame: a round from before the chart's range is in the list below. */}
+            {p?.by_year?.some((y) => y.led + y.joined > 0) ? (
               <section className="inv__sec">
                 <h2>Rounds per year</h2>
                 <YearBars data={p.by_year} variant="full" label={`${s.name}, rounds per year`} />
@@ -336,7 +346,7 @@ export function InvestorPage() {
             <footer className="run__proof">
               <p>
                 <Mark size={18} />
-                <span className="num">{proofLine(result)}.</span>
+                <span className="num">{reading ? 'Still counting the facts and sources behind this page' : proof}.</span>
               </p>
               <p className="faint">Every count and round on this page comes from Cala and links to the page Cala found it on.</p>
             </footer>

@@ -36,20 +36,23 @@ function toCsv(a: Audit): string {
 }
 
 function Numbers({ a }: { a: Audit }) {
-  const items: { n: number; label: string; cls?: string }[] = [
+  const read: { n: number; label: string }[] = [
     { n: a.pages, label: 'pages read' },
     { n: a.claims, label: 'lead claims checked' },
+  ]
+  // The four ways a check can end. Each is one segment of the bar, in this order.
+  const ends: { n: number; label: string; cls: string }[] = [
     { n: a.confirmed, label: 'confirmed word for word', cls: 'is-ok' },
     { n: a.corrected, label: 'corrected', cls: 'is-fix' },
-    { n: a.unstated, label: 'page does not say who led' },
-    { n: a.unread, label: 'page could not be read' },
+    { n: a.unstated, label: 'page does not say who led', cls: 'is-open' },
+    { n: a.unread, label: 'page could not be read', cls: 'is-unread' },
   ]
   const total = Math.max(1, a.confirmed + a.corrected + a.unstated + a.unread)
   return (
     <div className="audit__sum">
       <dl className="audit__nums">
-        {items.map((x) => (
-          <div key={x.label} className={x.cls}>
+        {read.map((x) => (
+          <div key={x.label}>
             <dd className="num">{x.n.toLocaleString('en-GB')}</dd>
             <dt>{x.label}</dt>
           </div>
@@ -60,11 +63,18 @@ function Numbers({ a }: { a: Audit }) {
         role="img"
         aria-label={`Of ${a.claims} lead claims: ${a.confirmed} confirmed, ${a.corrected} corrected, ${a.unstated} the page does not say, ${a.unread} not read`}
       >
-        <i className="is-ok" style={{ flexGrow: a.confirmed / total }} />
-        {a.corrected > 0 && <i className="is-fix" style={{ flexGrow: a.corrected / total }} />}
-        {a.unstated > 0 && <i className="is-open" style={{ flexGrow: a.unstated / total }} />}
-        {a.unread > 0 && <i className="is-unread" style={{ flexGrow: a.unread / total }} />}
+        {ends.map((x) => x.n > 0 && <i key={x.cls} className={x.cls} style={{ flexGrow: x.n / total }} />)}
       </div>
+      <dl className="audit__key">
+        {ends.map((x) => (
+          <div key={x.label} className={x.cls}>
+            <i aria-hidden="true" />
+            <dd className="num">{x.n.toLocaleString('en-GB')}</dd>
+            <dt>{x.label}</dt>
+          </div>
+        ))}
+      </dl>
+      <p className="audit__grows">Counted over every walk so far; it grows as people use it.</p>
     </div>
   )
 }
@@ -101,7 +111,7 @@ function Draw({ rows }: { rows: ConfirmedRow[] }) {
           </button>
         )}
       </div>
-      <ol className="finds finds--draw" key={state.n}>
+      <ol className="finds finds--cols finds--draw" key={state.n}>
         {state.picks.map((r, i) => (
           <ConfirmedItem key={`${r.round}:${r.cala}`} row={r} index={i} />
         ))}
@@ -209,7 +219,7 @@ export function AuditPage() {
               </div>
             </div>
             {a.leads.length ? (
-              <ul className="finds">{a.leads.map((r) => <LeadFix key={`${r.round}:${r.cala}`} row={r} />)}</ul>
+              <ul className="finds finds--cols">{a.leads.map((r) => <LeadFix key={`${r.round}:${r.cala}`} row={r} />)}</ul>
             ) : (
               <p className="muted">No page has named a different lead so far.</p>
             )}

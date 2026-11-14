@@ -60,7 +60,7 @@ export function PageLink({ url, publisher }: { url: string | null | undefined; p
 type Tone = 'ok' | 'plain' | 'fix'
 const STATUS: Record<CheckStatus, { label: string; tone: Tone; tip: string }> = {
   lead: { label: 'On the page', tone: 'ok', tip: 'The page Cala cites says, in these words, that it led this round.' },
-  report: { label: 'From a report', tone: 'plain', tip: 'This round comes from a report Cala read, not from a page about the round.' },
+  report: { label: 'In a report Cala read', tone: 'ok', tip: 'This round is not in Cala’s graph. A page Cala’s knowledge search read says, in these words, that it led it.' },
   follower: { label: 'Page names another lead', tone: 'fix', tip: 'The page lists it in the round under a different lead.' },
   unstated: { label: 'Named, not as lead', tone: 'plain', tip: 'The page names it in the round but does not say it led.' },
   other: { label: 'Led another round', tone: 'plain', tip: 'The page says it led a different round of this company.' },
@@ -89,7 +89,7 @@ export function CheckNote({ check, who, promoted }: { check: Check | null | unde
   if (!check) return null
   const others = ledBy(check)
   const fix = check.status === 'follower'
-  const isLead = check.status === 'lead'
+  const isLead = check.status === 'lead' || (check.status === 'report' && !!check.quote)
   const me = who ? [who] : []
   return (
     <div className={`chk${fix ? ' chk--fix' : ''}`}>
@@ -131,19 +131,26 @@ function When({ row }: { row: { stage_name: string | null; date: string | null }
 const claim = (cala: string, row: { company: string; stage_name: string | null }) =>
   `${cala} led ${possessive(row.company)} ${stageWord(row.stage_name)}`
 
-/** A lead claim the page confirms word for word. */
-export function ConfirmedItem({ row, index }: { row: ConfirmedRow; index?: number }) {
+/** A lead claim the page confirms word for word. `more`: other leads Cala names for the round that the same sentence confirms. */
+export function ConfirmedItem({ row, index, more = [] }: { row: ConfirmedRow; index?: number; more?: ConfirmedRow[] }) {
+  const rows = [row, ...more]
   return (
     <li className="find" style={index != null ? ({ '--i': index } as CSSProperties) : undefined}>
-      <p className="find__line">
-        <span className="find__who">Cala</span>
-        <span className="find__claim">{claim(row.cala, row)}</span>
-        <When row={row} />
-      </p>
-      <div className="find__line">
+      {rows.map((r) => (
+        <p className="find__line" key={r.cala}>
+          <span className="find__who">Cala</span>
+          <span className="find__said">
+            <span className="find__claim">{claim(r.cala, r)}</span>
+            <When row={r} />
+          </span>
+        </p>
+      ))}
+      <div className="find__line find__line--page">
         <span className="find__who">Page</span>
-        <Quote text={row.quote} hit={[row.cala]} />
-        <PageLink url={row.url} publisher={row.publisher} />
+        <div className="find__proof">
+          <Quote text={row.quote} hit={rows.map((r) => r.cala)} />
+          <PageLink url={row.url} publisher={row.publisher} />
+        </div>
       </div>
     </li>
   )
@@ -155,22 +162,27 @@ export function LeadFix({ row }: { row: LeadFinding }) {
     <li className="find find--fix">
       <p className="find__line">
         <span className="find__who">Cala</span>
-        <span className="find__claim find__claim--was">{claim(row.cala, row)}</span>
-        <When row={row} />
-      </p>
-      <div className="find__line">
-        <span className="find__who">Page</span>
-        <span className="find__claim find__claim--is">
-          {row.page.length ? `${listAnd(row.page)} led` : row.other_round ? `It led the ${stageWord(row.other_round)}` : 'Someone else led'}
+        <span className="find__said">
+          <span className="find__claim find__claim--was">{claim(row.cala, row)}</span>
+          <When row={row} />
         </span>
-      </div>
-      {(row.quote || row.url) && (
-        <div className="find__line">
-          <span className="find__who" aria-hidden="true" />
+      </p>
+      <div className="find__line find__line--page">
+        <span className="find__who">Page</span>
+        <div className="find__proof">
+          <span className="find__claim find__claim--is">
+            {row.page.length ? `${listAnd(row.page)} led` : row.other_round ? `It led the ${stageWord(row.other_round)}` : 'Someone else led'}
+          </span>
           <Quote text={row.quote} hit={row.page} also={[row.cala]} />
           <PageLink url={row.url} publisher={row.publisher} />
+          {(row.note || row.cala_date) && (
+            <p className="find__note">
+              {row.cala_date && row.date ? `Cala dates this round ${fmtMonth(row.cala_date)}; the page is from ${fmtMonth(row.date)}. ` : ''}
+              {row.note}
+            </p>
+          )}
         </div>
-      )}
+      </div>
     </li>
   )
 }

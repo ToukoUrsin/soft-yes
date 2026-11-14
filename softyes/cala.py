@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextvars
 import hashlib
 import json
 import os
@@ -24,6 +25,39 @@ DB_PATH = Path(os.environ.get("SOFTYES_DB") or ROOT / "data" / "cache.db")  # th
 PER_MINUTE = int(os.environ.get("CALA_PER_MINUTE", "80"))
 CREDIT_CAP = int(os.environ.get("CALA_CREDIT_CAP", "3060"))  # fresh calls allowed since PLAN_START
 PLAN_START = float(os.environ.get("CALA_PLAN_START", "1794611220"))  # 2026-11-13T23:07Z, first credit pack
+
+
+# Who is asking: (visitor id, address), set per request on the public host. A visitor may cause this many fresh Cala
+# calls a day; after that it is served from what has been read already. Nobody can drain the credits for the next one.
+VISITOR: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar("visitor", default=None)
+VISITOR_CAP = int(os.environ.get("CALA_VISITOR_CAP", "150"))
+ADDRESS_CAP = int(os.environ.get("CALA_ADDRESS_CAP", "600"))   # many people can share one address (a venue's network)
+_spent: dict[str, collections.deque] = {}
+
+
+def _spent_today(key: str) -> int:
+    q = _spent.get(key)
+    if not q:
+        return 0
+    now = time.time()
+    while q and now - q[0] > 86400:
+        q.popleft()
+    return len(q)
+
+
+def visitor_left() -> int | None:
+    """Fresh Cala calls the current visitor may still cause today; None when nobody is counted (local work)."""
+    who = VISITOR.get()
+    if not who:
+        return None
+    return max(0, min(VISITOR_CAP - _spent_today("v:" + who[0]), ADDRESS_CAP - _spent_today("a:" + who[1])))
+
+
+def _visitor_spend() -> None:
+    who = VISITOR.get()
+    if who:
+        for key in ("v:" + who[0], "a:" + who[1]):
+            _spent.setdefault(key, collections.deque()).append(time.time())
 
 
 class CalaError(RuntimeError):
@@ -126,11 +160,15 @@ class Cala:
             return resp
         if self.credits_used() >= CREDIT_CAP:
             raise BudgetExceeded("Cala credit cap reached; serving cached graph only.")
+        if visitor_left() == 0:
+            raise BudgetExceeded("This visit has used its share of fresh Cala calls for today. "
+                                 "Everything Soft Yes has already read is still served.")
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._inflight[key] = fut
         try:
             resp, seconds = await self._fetch(method, url, body)
             self.store(method, url, body, resp, seconds)
+            _visitor_spend()
             if ledger:
                 ledger.add(False, seconds)
             fut.set_result(resp)

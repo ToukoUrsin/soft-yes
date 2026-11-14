@@ -82,7 +82,7 @@ export function dealPhrase(d: {
   stage = stage.replace(/series ([a-z])/, (_, c: string) => `Series ${c.toUpperCase()}`)
   const money = fmtMoney(d.amount, d.currency)
   const when = fmtMonth(d.date)
-  const core = `${issuer}'s ${money ? `${money} ` : ''}${stage}`
+  const core = `${d.issuer?.name ? possessive(issuer) : 'a company’s'} ${money ? `${money} ` : ''}${stage}`
   return when ? `${core} (${when})` : core
 }
 

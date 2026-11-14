@@ -1,13 +1,22 @@
 // The page check for one company: its rounds in Cala, who Cala says led each, and what the cited pages say.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { api, type ApiError, type CompanyCheck as Result, type CompanyRound } from '../lib/api'
+import { api, type ApiError, type CompanyCheck as Result, type CompanyRound, type ConfirmedRow } from '../lib/api'
 import { fmtMoney, fmtMonth, plural, stageWord } from '../lib/format'
 import { CheckNote, ConfirmedItem, LeadFix, PageLink, Quote } from './Evidence'
 import { Icon } from './ui'
 import '../styles/check.css'
 
 const TRY = ['Verda', 'Measur', 'Lovable', 'Wolt']
+
+const DANGLING = /^(an?|the|in|at|of|on|for|with|and|or|by|to|from|that|which|based|headquartered|founded|located)$/i
+
+/** A few words that tell two companies of one name apart, never ending on "in" or "founded". */
+function shortHint(description: string): string {
+  const words = description.replace(/^(an?|the)\s+/i, '').split(/\s+/).slice(0, 4).map((w) => w.replace(/[,.;:]+$/, ''))
+  while (words.length > 1 && DANGLING.test(words[words.length - 1])) words.pop()
+  return words.join(' ')
+}
 
 function readParam(): string {
   try {
@@ -33,6 +42,20 @@ function RoundBlock({ round, company }: { round: CompanyRound; company: string }
   const base = { round: round.id, company, stage_name: round.stage_name, date: null }   // the date is in the round's heading
   const amount = round.amount_set_aside ? '' : fmtMoney(round.amount, round.currency)
   const stage = stageWord(round.stage_name)
+
+  // One sentence often confirms several leads ("led by A, B and C"): show it once, under all the claims it confirms.
+  type Item = { key: string; confirmed?: ConfirmedRow[]; inv?: (typeof claims)[number] }
+  const items: Item[] = []
+  for (const i of claims) {
+    const c = i.check
+    if (c?.status === 'lead' && i.cala_lead && c.quote && c.url) {
+      const row: ConfirmedRow = { ...base, ...(c.earlier ? { stage_name: c.earlier.stage_name ?? 'Round', date: c.earlier.date } : {}), kind: 'confirmed', cala: i.name, quote: c.quote, url: c.url, publisher: c.publisher ?? null }
+      const same = items.find((x) => x.confirmed && x.confirmed[0].quote === row.quote && x.confirmed[0].url === row.url && x.confirmed[0].stage_name === row.stage_name)
+      if (same?.confirmed) same.confirmed.push(row)
+      else items.push({ key: i.name, confirmed: [row] })
+    } else items.push({ key: i.name, inv: i })
+  }
+
   return (
     <li className="cround">
       <p className="cround__head">
@@ -44,20 +67,20 @@ function RoundBlock({ round, company }: { round: CompanyRound; company: string }
         <p className="cround__none">Cala names no lead for this round, so there is nothing to check.</p>
       ) : (
         <ul className="finds">
-          {claims.map((i) => {
+          {items.map(({ key, confirmed, inv }) => {
+            if (confirmed) return <ConfirmedItem key={key} row={confirmed[0]} more={confirmed.slice(1)} />
+            const i = inv!
             const c = i.check
-            if (c?.status === 'lead' && i.cala_lead && c.quote && c.url)
-              return <ConfirmedItem key={i.name} row={{ ...base, ...(c.earlier ? { stage_name: c.earlier.stage_name ?? 'Round', date: c.earlier.date } : {}), kind: 'confirmed', cala: i.name, quote: c.quote, url: c.url, publisher: c.publisher ?? null }} />
             if (c?.status === 'follower')
-              return <LeadFix key={i.name} row={{ ...base, kind: 'lead', cala: i.name, page: c.led_by ?? [], quote: c.quote ?? null, url: c.url ?? null, publisher: c.publisher ?? null }} />
+              return <LeadFix key={key} row={{ ...base, kind: 'lead', cala: i.name, page: c.led_by ?? [], quote: c.quote ?? null, url: c.url ?? null, publisher: c.publisher ?? null }} />
             return (
-              <li className="find" key={i.name}>
+              <li className="find" key={key}>
                 <p className="find__line">
                   <span className="find__who">{i.cala_lead ? 'Cala' : 'Page'}</span>
                   <span className="find__claim">{i.name} led</span>
                 </p>
-                <div className="find__line">
-                  <span className="find__who" aria-hidden="true" />
+                <div className="find__line find__line--page">
+                  <span className="find__who">{c && i.cala_lead ? 'Page' : ''}</span>
                   <div className="cround__note">
                     {c ? <CheckNote check={c} who={i.name} promoted={i.promoted} /> : <span className="faint">Cala cites no page for this round.</span>}
                   </div>
@@ -97,7 +120,7 @@ function Answer({ d, onPick }: { d: Result; onPick: (id: string, name: string) =
             {others.map((m) => {
               // Cala can hold several entities under one name: tell them apart by how each is described.
               const twin = m.name.toLowerCase() === co.name.toLowerCase() || others.some((o) => o !== m && o.name.toLowerCase() === m.name.toLowerCase())
-              const hint = twin && m.description ? m.description.replace(/^(an?|the)\s+/i, '').split(/\s+/).slice(0, 4).join(' ').replace(/[,.;:]+$/, '') : ''
+              const hint = twin && m.description ? shortHint(m.description) : ''
               return (
                 <button key={m.id} type="button" className="chip" title={m.description ?? undefined} onClick={() => onPick(m.id, m.name)}>
                   <span className="truncate">
@@ -136,10 +159,12 @@ function Answer({ d, onPick }: { d: Result; onPick: (id: string, name: string) =
               <ul className="finds">
                 {quotes.map((q, i) => (
                   <li className="find" key={i}>
-                    <div className="find__line">
+                    <div className="find__line find__line--page">
                       <span className="find__who">{q.table ? 'Table' : 'Page'}</span>
-                      {q.table ? <p className="ccheck__tablerow">{q.quote}</p> : <Quote text={q.quote} />}
-                      <PageLink url={q.url} publisher={q.publisher} />
+                      <div className="find__proof">
+                        {q.table ? <p className="ccheck__tablerow">{q.quote}</p> : <Quote text={q.quote} />}
+                        <PageLink url={q.url} publisher={q.publisher} />
+                      </div>
                     </div>
                   </li>
                 ))}

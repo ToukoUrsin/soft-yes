@@ -485,7 +485,7 @@ const TARGET_MS = 8200
 const SETTLE_MS = 950
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const RETRY_MS = [600, 1500, 3000]
+const RETRY_MS = [600, 1500, 3000, 5000, 7000]
 
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 

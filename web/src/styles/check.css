@@ -58,12 +58,11 @@
   animation: find-in 320ms var(--ease) backwards;
 }
 
+/* The name and what it is, then the other companies of that name: always in that order, at any width. */
 .ccheck__co {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px 24px;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
 }
 
 .ccheck__co > div {
@@ -113,8 +112,7 @@
 }
 
 .ccheck__tablerow {
-  grid-column: 2;
-  max-width: 78ch;
+  max-width: 72ch;
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
@@ -123,17 +121,24 @@
   max-width: 300px;
 }
 
+/* A company's rounds, newest first: the round on the left, what the pages say about its leads on the right. */
 .crounds {
   display: grid;
-  gap: 26px;
-  margin-top: 22px;
+  margin-top: 20px;
+}
+
+.cround {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 32px;
+  padding: 16px 0 18px;
+  border-top: 1px solid var(--line);
 }
 
 .cround__head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 8px;
+  display: grid;
+  gap: 1px;
   font-size: var(--fs-s);
   color: var(--text-3);
 }
@@ -144,19 +149,22 @@
   color: var(--text);
 }
 
-.cround__head time {
-  margin-left: auto;
-}
-
 .cround__none {
-  padding: 12px 0;
-  border-block: 1px solid var(--line);
+  max-width: 72ch;
   font-size: var(--fs-s);
   color: var(--text-3);
 }
 
+.cround .find:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cround .find:last-child {
+  padding-bottom: 0;
+}
+
 .cround__note {
-  grid-column: 2 / -1;
   min-width: 0;
 }
 
@@ -167,6 +175,22 @@
 }
 
 @media (max-width: 720px) {
+  .cround {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px 0 16px;
+  }
+
+  .cround__head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .cround__head time {
+    margin-left: auto;
+  }
+
   .ccheck__form .input {
     width: 100%;
   }

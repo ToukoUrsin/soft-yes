@@ -5,3 +5,7 @@ node_modules/
 web/dist/
 research/cache/
 *.pyc
+.env
+film/out/
+film/capture/
+judging/*.mp4

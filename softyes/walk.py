@@ -33,6 +33,7 @@ CAP_COMPANIES = 8    # portfolio companies opened on that path
 CAP_ROUNDS = 2       # most recent rounds opened per portfolio company
 CAP_WEIGHT = 0.6     # "led a round in a company you both back" counts less than "led a round you joined"
 SOFT_LED_ROUNDS = 3  # a soft yes's own most recent led rounds, opened for the follower profile
+THIN_WALK = 6        # fewer followed rounds than this across all soft yeses: a list, not a ranking
 DEEP_BELOW = 8       # fewer followed rounds than this in the graph: also ask Cala's knowledge search
 
 # How far a lead can be counted on, from what Cala holds about it. Leads are listed tier by tier.
@@ -86,6 +87,12 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         return
     tally["rounds"] += 1
     tally["pages"] += c["read"]
+    # Is the investor who said yes named on a page about this round? Under its own name, or the name Cala lists it by.
+    rd["soft_on_page"] = {
+        key: key in c.get("also_named", []) or any(
+            graph.norm(i["name"]) in c["named"] for i in rd["investors"]
+            if graph.norm(i["name"]) == key or i["id"] in (rd.get("_soft_ids") or {}).get(key, []))
+        for key, _ in rd.get("look_for") or []}
     by_key = {graph.norm(i["name"]): i["name"] for i in rd["investors"]}
     read_urls = {p["url"] for p in c["pages"] if p["status"] == "read"}
     stage = rd.get("stage")
@@ -141,7 +148,14 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         elif listed and page_leads:
             # the page names the lead and lists this investor among the others: a co-investor, not the lead
             i["is_lead"] = False
-            i["check"] = {"status": "follower", **listed, "led_by": _led_by(page_leads, listed.get("quote"), i["name"])}
+            led_by = _led_by(page_leads, listed.get("quote"), i["name"])
+            proof = listed
+            if not any(pagecheck.read(listed.get("quote") or "", n)["status"] == "lead" for n in led_by):
+                # the sentence that lists it names no lead ("co-led by angel investors, with ..."): quote the one that does
+                k = next((k for k in c["leads"] if by_key.get(k) in led_by and k not in elsewhere), None)
+                if k:
+                    proof = {**c["leads"][k], "listed": listed.get("quote")}
+            i["check"] = {"status": "follower", **proof, "led_by": led_by, "page_date": c.get("dated", {}).get(proof.get("url"))}
             rd.setdefault("corrected", []).append(key)
             if i["id"]:
                 rd.setdefault("corrected_ids", []).append(i["id"])
@@ -156,6 +170,10 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         else:
             i["check"] = {"status": "unread"}   # its own pages could not be read; the others do not name it
             tally["unread"] += 1
+    fixes = [i["check"] for i in rd["investors"] if (i.get("check") or {}).get("status") == "follower"]
+    if len({tuple(sorted(f["led_by"])) for f in fixes}) > 1 and len({f.get("url") for f in fixes}) > 1:
+        for f in fixes:   # two pages, two different leads: Cala holds two rounds of this company as one
+            f["two_rounds"] = True
     if rd.get("corrected"):
         # Cala named the wrong lead and the page names the right one: that one leads this round
         for i in rd["investors"]:
@@ -187,6 +205,11 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         rd["stage_page"] = {"cala": rd["stage_name"], "page": graph.STAGE_NAMES.get(new, new) if new else None}
         rd["stage"], rd["stage_name"] = new, graph.STAGE_NAMES.get(new, new) if new else "Round"
         tally["stages"] += 1
+
+
+def _on_page(d: dict, soft_key: str) -> bool:
+    """The page about this round names the investor who said yes."""
+    return any(k == soft_key and on for k, on in zip(d.get("with_keys", []), d.get("with_on_page", [])))
 
 
 def _days_before(page_date: str | None, round_date: str | None) -> int:
@@ -231,6 +254,11 @@ def _note_check(rd: dict, c: dict | None, findings: list[dict], claims: list[lis
         if ch["status"] == "follower" and co and not _no_name(i["name"]):
             findings.append({**base, "kind": "lead", "cala": i["name"], "page": ch.get("led_by") or [], "quote": ch.get("quote"),
                              "url": ch.get("url"), "publisher": ch.get("publisher"), "other_round": ch.get("other_round")})
+            # the page that names the lead is from another time than Cala's date for the round: the page's date is the round's
+            if ch.get("page_date") and rd.get("date") and abs(_days_before(ch["page_date"], rd["date"])) > pagecheck.NEAR_DAYS:
+                findings[-1].update({"date": ch["page_date"], "cala_date": rd["date"]})
+            if ch.get("two_rounds"):
+                findings[-1]["note"] = "Cala's pages name two different leads here: it holds two rounds of this company as one."
     aside = rd.get("amount_set_aside") or {}
     if aside.get("why") == "page" and co:
         findings.append({**base, "kind": "amount", "amount": aside["amount"], "currency": aside["currency"], "pages": read})
@@ -259,7 +287,7 @@ def _stage_weight(stage: str | None, want: str | None, mild: bool = False, near:
     rounds the soft yeses joined, so it weighs less. `near`: a round next to that stage whose label was set aside."""
     if not want or want not in graph.STAGE_ORDER:
         return 1.0
-    steps = (1.0, 0.85, 0.65, 0.45) if mild else (1.0, 0.7, 0.45, 0.45)
+    steps = (1.0, 0.85, 0.65, 0.45) if mild else (1.0, 0.7, 0.4, 0.25)
     if near:
         return steps[1]
     if not stage or stage not in graph.STAGE_ORDER:
@@ -407,6 +435,58 @@ def _pulse(inv: dict, dates: dict[str, str] | None = None, led_too: dict[str, di
             "capped": inv["capped"], "portfolio_size": len(inv["portfolio"])}
 
 
+def _record(key: str, inv: dict, dates: dict, led: dict, canon: dict, not_led: set, labels: dict) -> dict:
+    """What every walk so far has learned about this investor's own rounds, joined with what this one learned.
+
+    A walk opens only some of an investor's rounds, so two walks used to count the same investor differently
+    ("leads 22 of 47" here, "25 of 48" there). The joined record is kept, and every walk counts from it."""
+    from . import extras   # extras reads walk results; imported here so the two modules stay apart
+    own = {r["id"] for r in inv["rounds"]} | set(led)
+    own |= {canon[i] for i in own if i in canon}
+    mine = {"dates": {k: v for k, v in dates.items() if k in own and v}, "led_too": dict(led),
+            "canon": {k: v for k, v in canon.items() if k in own or v in own},
+            "not_led": sorted(not_led), "labels": {k: v for k, v in labels.items() if k in own and v}}
+    try:
+        old = extras.blob_get("record2:" + key) or {}
+    except Exception:
+        return mine
+    # one deal held under several ids: every id points at the smallest, whichever walk met them first
+    group: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        while group.get(x, x) != x:
+            x = group[x]
+        return x
+
+    for a, b in list((old.get("canon") or {}).items()) + list(mine["canon"].items()):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            group[max(ra, rb)] = min(ra, rb)
+        group.setdefault(a, find(a)), group.setdefault(b, find(b))
+    both = {"canon": {x: find(x) for x in group if find(x) != x},
+            # a value an earlier walk kept stays, so the record cannot flip between two walks
+            "dates": {**mine["dates"], **(old.get("dates") or {})},
+            "labels": {**mine["labels"], **(old.get("labels") or {})},
+            "led_too": {**mine["led_too"], **(old.get("led_too") or {})},
+            "not_led": sorted(set(old.get("not_led") or []) | set(mine["not_led"]))}
+    # Cala can hold one firm as several entities, and a walk does not always meet all of them: keep every round seen
+    held = {r["id"]: r for r in old.get("rounds") or []}
+    for r in inv["rounds"]:
+        held.setdefault(r["id"], {k: r.get(k) for k in ("id", "label", "is_lead", "reported")})
+        held[r["id"]]["is_lead"] = bool(held[r["id"]]["is_lead"] or r["is_lead"])
+    both["rounds"] = sorted(held.values(), key=lambda r: (r.get("reported") or "", r["id"]))
+    for field in ("dates", "labels"):
+        for x, rep in both["canon"].items():
+            if x in both[field]:
+                both[field].setdefault(rep, both[field][x])
+    if both != old:
+        try:
+            extras.blob_put("record2:" + key, both)
+        except Exception:
+            pass
+    return both
+
+
 def _merge(invs: list[dict]) -> dict:
     """One investor from the several Cala entities that are it: rounds and portfolio de-duplicated."""
     rounds, portfolio, seen_r, seen_c = [], [], set(), set()
@@ -512,13 +592,21 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
     if e["ring"] == 1:
         if same:
             who, n = _names(sorted({w for d in same for w in d['with']})), len(same)
-            ok = sum(1 for d in same if (d.get("check") or {}).get("status") in CONFIRMED)
-            read = ok + sum(1 for d in same if (d.get("check") or {}).get("status") in ("unstated", "other", "absent", "off"))
+            status = [(d.get("check") or {}).get("status") for d in same]
+            ok, told = status.count("lead"), status.count("report")   # on the cited page, or in a report Cala read
+            read = ok + sum(1 for x in status if x in ("unstated", "other", "absent", "off"))
             if ok == n:
                 out.append({"tone": "good", "text": f"Led {_plural(n, 'round')} that {who} joined, as the cited "
                                                     f"{'page says' if n == 1 else 'pages say'}"})
+            elif told == n:
+                out.append({"tone": "good", "text": f"Led {_plural(n, 'round')} that {who} joined, as "
+                                                    f"{'a report' if n == 1 else 'reports'} Cala read "
+                                                    f"{'says' if n == 1 else 'say'}"})
             elif ok:
-                out.append({"tone": "good", "text": f"Led {_plural(n, 'round')} that {who} joined; the cited pages confirm {ok}"})
+                out.append({"tone": "good", "text": f"Led {_plural(n, 'round')} that {who} joined; the cited pages confirm {ok}"
+                                                    + (f", reports {told}" if told else "")})
+            elif told:
+                out.append({"tone": "good", "text": f"Led {_plural(n, 'round')} that {who} joined; reports Cala read back {told}"})
             elif read:
                 out.append({"tone": "warn", "text": f"Cala marks it lead of {_plural(n, 'round')} that {who} joined; "
                                                     f"the cited {'page does' if n == 1 else 'pages do'} not say who led"})
@@ -608,6 +696,25 @@ def _verdict(s: dict) -> tuple[str, str]:
     return "follows", f"{count}{pages} It follows by habit, so the lead has to come from someone else.{sample}{grant}"
 
 
+def _followed(softs: list[dict]) -> int:
+    """Rounds in this walk that a soft yes joined under someone else's lead, from the graph or from a report."""
+    return len({d["id"] for s in softs for d in s.get("followed_rounds") or [] if d.get("relation") == "round"})
+
+
+def _start(softs: list[dict], leads: list[dict]) -> dict:
+    """Where to start, and how sure the order is. mode: pick (one first lead) | tie (two that Cala's record cannot
+    tell apart) | list (too few rounds walked to rank at all) | none."""
+    if not leads:
+        return {"mode": "none", "keys": [], "followed": 0}
+    followed = _followed(softs)
+    top, second = leads[0], leads[1] if len(leads) > 1 else None
+    if followed < THIN_WALK:
+        return {"mode": "list", "keys": [e["key"] for e in leads[:3]], "followed": followed}
+    if second and second["tier"] == top["tier"] and second["score"] >= 0.92 * top["score"]:
+        return {"mode": "tie", "keys": [top["key"], second["key"]], "followed": followed}
+    return {"mode": "pick", "keys": [top["key"]], "followed": followed}
+
+
 def _headline(softs: list[dict], leads: list[dict]) -> str:
     names = _names([s["name"] for s in softs])
     if not leads:
@@ -621,8 +728,21 @@ def _headline(softs: list[dict], leads: list[dict]) -> str:
     line = f"{_plural(len(leads), 'investor')} led {where}"
     if 0 < active < len(leads):
         line += f", and {active} of them {'is' if active == 1 else 'are'} leading now"
+    followed = _followed(softs)
+    if followed < THIN_WALK:
+        # a handful of rounds is a list, not a ranking: say so instead of naming a first pick
+        back = f"{names} back{'s' if len(softs) == 1 else ''}"
+        if not followed:
+            return (f"Cala holds no round that {names} joined under another lead. {_plural(len(leads), 'investor')} led "
+                    f"rounds in companies {back}: read this as a list, not a ranking.")
+        return (f"Cala holds {_plural(followed, 'round')} that {names} joined without leading. That is too few to rank, "
+                f"so read this as a list: {_plural(len(leads), 'investor')} led {'it' if followed == 1 else 'them'}"
+                + (f" or rounds in companies {back}" if cap else "") + ".")
     line += f". Start with {top['name']}"
     n = len(top["evidence"])
+    second = leads[1] if len(leads) > 1 else None
+    if second and second["tier"] == top["tier"] and second["score"] >= 0.92 * top["score"]:
+        return line + f" or {second['name']}: Cala's record puts them level."   # too close to call one first
     if top.get("led_recent"):
         line += (f": it led {n} of those rounds and {_plural(top['led_recent'], 'round')} "
                  f"in the last {RECENT_MONTHS} months.")
@@ -649,10 +769,12 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         """Run one Cala read. When credits run out, fall back to what is already cached."""
         try:
             return await fn(cala, *args, ledger=ledger, cache_only=state["cache_only"])
-        except BudgetExceeded:
+        except BudgetExceeded as exc:
             if not state["cache_only"]:
                 state["cache_only"] = True
-                notes.append("Live reads from Cala are paused (credit cap). Showing what is already walked.")
+                notes.append("This visit has used its share of fresh Cala reads for today. Showing what is already walked."
+                             if "this visit" in str(exc).lower() else
+                             "Live reads from Cala are paused (credit cap). Showing what is already walked.")
                 await emit({"t": "note", "text": notes[-1]})
             return await fn(cala, *args, ledger=ledger, cache_only=True)
         except CalaError as exc:
@@ -762,8 +884,11 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                       "stage_name": graph.STAGE_NAMES.get(row["stage"] or "", "Round"),
                       "date": row["date"], "amount": row["amount"], "currency": row["currency"],
                       "issuer": {"id": None, "name": row["company"]}, "sources": row["sources"],
+                      # the passage's own sentence naming the lead, when it has one, is shown as its proof
                       "investors": [{"id": None, "name": graph.pretty(n), "type": None, "kind": "fund", "is_lead": True,
-                                     "sources": row["sources"]} for n in row["leads"]]}
+                                     "sources": row["sources"],
+                                     **({"check": {"status": "report", **row["said"][n]}} if n in (row.get("said") or {}) else {})}
+                                    for n in row["leads"]]}
                 rounds.setdefault(rd["id"], rd)
                 joined[rd["id"]].add(s["key"])
                 added += 1
@@ -849,6 +974,9 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             await emit({"t": "pages", "state": "done", "rounds": tally["rounds"], "pages": tally["pages"], "confirmed": tally["lead"],
                         "corrected": tally["corrected"], "unstated": tally["unstated"] + tally["absent"]})
 
+    for rid, rd in rounds.items():   # the page is also asked whether it names the investor who said yes in this round
+        rd["look_for"] = [[s["key"], s["name"]] for s in softs if s["key"] in joined[rid]]
+        rd["_soft_ids"] = {s["key"]: s["ids"] for s in softs if s["key"] in joined[rid]}
     await read_pages(list(rounds.values()) + [rd for s in softs for rd, _ in s.get("_own", [])], PAGE_SECONDS)
     for s in softs:
         # the soft yes's own led rounds: one the page credits to someone else is not a round it led
@@ -925,6 +1053,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                         "check": link.get("check"), "promoted": link.get("promoted", False),
                         "with": [next(s["name"] for s in softs if s["key"] == k) for k in link["with"]],
                         "with_keys": link["with"],
+                        # does a page about this round name that investor? True, False, or None when no page was read
+                        "with_on_page": [(rd.get("soft_on_page") or {}).get(k) for k in link["with"]],
                         # "round": the soft yes was in this round. "cap_table": it backs the company, round not on record.
                         "relation": "round" if any(k in joined[rid] for k in link["with"]) else "cap_table",
                         "co_leads": [i["name"] for i in rd["investors"] if i["is_lead"] and graph.norm(i["name"]) != e["key"]],
@@ -943,8 +1073,15 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         usual = min((st for st, n in staged.items() if n == top), key=graph.STAGE_ORDER.index)
     rank_stage = want_stage or usual
 
+    def stage_of(d: dict) -> str | None:
+        """The round's stage: Cala's label, else the one the page that confirms the lead gives it."""
+        if d.get("stage"):
+            return d["stage"]
+        said = (((d.get("check") or {}).get("earlier") or {}).get("stage_name") or "").upper().replace("-", "_").replace(" ", "_")
+        return said if said in graph.STAGE_ORDER else None
+
     def base_score(ev: list[dict]) -> float:
-        s = sum(_recency(d["date"]) * _stage_weight(d["stage"], rank_stage, mild=not want_stage,
+        s = sum(_recency(d["date"]) * _stage_weight(stage_of(d), rank_stage, mild=not want_stage,
                                                     near=(d.get("stage_set_aside") or {}).get("stage") == rank_stage) *
                 (1.0 if d["relation"] == "round" else CAP_WEIGHT) *
                 CHECK_WEIGHT.get((d.get("check") or {}).get("status"), CHECK_WEIGHT["unread"]) for d in ev)
@@ -1093,10 +1230,14 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
     labels = {d["id"]: d["stage_name"] for d in everything if d.get("stage") and d.get("id")}
     for e in order + second:
         if e.get("_inv"):
-            e["pulse"] = _pulse(e["_inv"], dates_for(e), led_too(e), canon, not_led_by(e), labels)
+            k = _record(e["key"], e["_inv"], dates_for(e), led_too(e), canon, not_led_by(e), labels)
+            e["pulse"] = _pulse({**e["_inv"], "rounds": k.get("rounds") or e["_inv"]["rounds"]}, k["dates"], k["led_too"],
+                                k["canon"], set(k["not_led"]), k["labels"])
     for s in softs:
         if s.get("_inv"):
-            s["pulse"] = _pulse(s["_inv"], opened, None, canon, not_led_by(s), labels)
+            k = _record(s["key"], s["_inv"], opened, {}, canon, not_led_by(s), labels)
+            s["pulse"] = _pulse({**s["_inv"], "rounds": k.get("rounds") or s["_inv"]["rounds"]}, k["dates"], k["led_too"],
+                                k["canon"], set(k["not_led"]), k["labels"])
 
     # 6. Final shape.
     def doubt(e: dict) -> dict | None:
@@ -1132,9 +1273,9 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             e["score"] *= 0.3
         on_record = (pulse or {}).get("rounds") or 0
         status = [(d.get("check") or {}).get("status") for d in ev]
-        confirmed = sum(1 for x in status if x in CONFIRMED)
+        confirmed, reported = status.count("lead"), status.count("report")   # said on the cited page; said in a report
         looked = confirmed + sum(1 for x in status if x in ("unstated", "other", "absent", "off"))
-        tier = "check" if unsure else "unconfirmed" if e["ring"] == 1 and looked and not confirmed else \
+        tier = "check" if unsure else "unconfirmed" if e["ring"] == 1 and looked and not (confirmed or reported) else \
             "active" if led_recent and on_record >= 3 else "thin" if led_recent else "quiet"
         per_soft = collections.defaultdict(list)
         for d in ev:
@@ -1142,7 +1283,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                 per_soft[(k, name)].append(d)
         # the round to mention to that investor: the latest one the page confirms, else the latest
         ask = sorted(({"key": k, "name": name, "deals": len(ds),
-                       "last": next((d for d in ds if (d.get("check") or {}).get("status") in CONFIRMED), ds[0])}
+                       "last": next((d for d in ds if (d.get("check") or {}).get("status") in CONFIRMED and _on_page(d, k)),
+                                    next((d for d in ds if (d.get("check") or {}).get("status") in CONFIRMED), ds[0]))}
                       for (k, name), ds in per_soft.items()),
                      key=lambda a: (a["deals"], a["last"]["date"] or ""), reverse=True)
         stages = collections.Counter(d["stage"] for d in led_known if d["stage"])
@@ -1164,7 +1306,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         return {"key": e["key"], "id": e["ids"][0] if e["ids"] else None, "ids": e["ids"], "name": e["name"], "kind": e["kind"],
                 "ring": e["ring"], "score": round(e["score"], 3), "tier": tier, "evidence": ev, "ask": ask[0] if ask else None,
                 "asks": ask, "pulse": pulse, "led_recent": led_recent, "record": e.get("record"), "doubt": unsure, "wrong_entity": bool(unsure),
-                "confirmed": confirmed, "checked": looked,
+                "confirmed": confirmed, "checked": looked, "reported": reported,
                 "recent_leads": led_known[:4], "last_led": last_led, "fit": fit,
                 # a range from one or two rounds says nothing about what it usually writes
                 "typical_round": {"min": amounts[0], "max": amounts[-1], "n": len(amounts)} if len(amounts) >= 3 else None,
@@ -1213,6 +1355,12 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             urls.update(s["url"] for s in d.get("sources", []))
         if e["pulse"]:
             facts += e["pulse"]["rounds"]
+    for s in soft_out:   # an investor with no followed rounds still has its own record and the rounds it led
+        facts += ((s.get("pulse") or {}).get("rounds") or 0) + 3 * len(s.get("led_rounds") or [])
+        for d in (s.get("led_rounds") or []) + (s.get("led_corrected") or []):
+            urls.update(x["url"] for x in d.get("sources", []))
+            if (d.get("check") or {}).get("url"):
+                urls.add(d["check"]["url"])
     result = {
         "run_id": run_id(inputs), "created": time.time(),
         "input": {"soft_yeses": [{"name": s["name"], "ids": s["ids"]} for s in softs], "stage": want_stage,
@@ -1220,7 +1368,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                   # no stage given: the one most of the walked rounds carry, used to weigh the list
                   "stage_usual": {"stage": usual, "stage_name": graph.STAGE_NAMES.get(usual, usual), "rounds": staged[usual],
                                   "of": sum(staged.values())} if usual else None},
-        "headline": _headline(soft_out, first),
+        "headline": _headline(soft_out, first), "start": _start(soft_out, first),
         "soft_yeses": soft_out, "leads": first, "second_ring": second_out,
         "tiers": [{**t, "count": sum(1 for e in first if e["tier"] == t["id"])} for t in TIERS
                   if any(e["tier"] == t["id"] for e in first)],

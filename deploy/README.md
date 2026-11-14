@@ -1,9 +1,8 @@
 # Public address
 
-https://soft-yes.fly.dev is a small Caddy machine on Fly (`deploy/fly/`) that forwards to the server on the
-team's box (`./run.sh`, port 8655) through the box's Tailscale funnel path `/softyes`.
+https://soft-yes.fly.dev runs the app itself on Fly (`deploy/fly/`): the Python server, the built page and a snapshot of the Cala cache. Its own cache lives on a volume, and the snapshot is merged into it on start, so nothing it has read is lost on a deploy.
 
-- Re-deploy the front door: `cd deploy/fly && hsec exec --only FLY_API_TOKEN -- flyctl deploy --ha=false --now`
-- The funnel path: `sudo tailscale funnel --bg --https=8443 --set-path /softyes http://127.0.0.1:8655`
-  (use `funnel`, not `serve`: `serve` turns the public funnel off for every other path on that port).
-- Take it down: `flyctl apps destroy soft-yes`, and `sudo tailscale funnel --https=8443 --set-path /softyes off`.
+- Keys are Fly secrets: `JUNCTION_CALA_API_KEY`, `JUNCTION_GEMINI_API_KEY`, `JUNCTION_OXYLABS_API_KEY`, `JUNCTION_SLUSH_MCP_TOKEN_JSON`.
+- Publish: `cd web && npm run build && cd .. && ./deploy/publish.sh` (needs `FLY_API_TOKEN`).
+- `deploy/refresh_runs.py` walks the stored runs again after a change to the walk, so old links show the new result.
+- Take it down: `flyctl apps destroy soft-yes`.
