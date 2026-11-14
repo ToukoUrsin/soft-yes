@@ -96,7 +96,6 @@ function Failed({ error, onRetry }: { error: string | null; onRetry: () => void 
 
 const KINDS: { id: DraftKind; name: string }[] = [
   { id: 'intro_ask', name: 'Intro ask' },
-  { id: 'direct', name: 'Direct' },
   { id: 'slush', name: 'Slush note' },
 ]
 
@@ -338,7 +337,7 @@ export function DraftPane({
 
 export function Drafts({ lead, result }: Props) {
   const [stored, setKind] = useSessionState<DraftKind>('softyes:draftkind', 'intro_ask')
-  const kind = stored === 'intro_ask' && !lead.ask ? 'direct' : stored
+  const kind = stored === 'direct' ? 'intro_ask' : stored   // a cold message to the lead is not offered
   return (
     <div className="drafts">
       <FounderFields result={result} />
@@ -347,9 +346,7 @@ export function Drafts({ lead, result }: Props) {
         <span className="faint">
           {kind === 'intro_ask'
             ? `To ${lead.ask?.name ?? 'your soft yes'}, asking for the introduction`
-            : kind === 'direct'
-              ? `To ${lead.name}, citing the shared deal`
-              : 'For the Slush meeting tool, 300 characters at most'}
+            : 'For the Slush meeting tool, 300 characters at most'}
         </span>
       </div>
       <DraftPane lead={lead} result={result} kind={kind} />

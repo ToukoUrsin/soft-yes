@@ -638,7 +638,13 @@ def load_run(run_id: str) -> dict | None:
     c = cala_mod.get()
     with c.dblock:
         row = c.db.execute("select result from runs where run_id=?", (run_id,)).fetchone()
-    return json.loads(row[0]) if row else None
+    if not row:
+        return None
+    result = json.loads(row[0])
+    for s in result.get("soft_yeses") or []:   # counted again on read, so a stored run follows today's rule
+        if "verdict" in s:
+            s["verdict"], s["insight"] = walk_mod._verdict(s)
+    return result
 
 
 def _annotate(result: dict) -> dict:

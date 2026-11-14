@@ -924,6 +924,7 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
 
 
 MIN_HABIT = 10   # rounds on record before "leads" or "follows" is called a habit
+MIN_GRAPH = 5    # of those, rounds in Cala's graph itself: the share it led is counted from these alone
 
 GRANTS = re.compile(r"\b(grants?|public funding|funding agency|government agency|innovation agency|development agency|"
                     r"governmental|public organi[sz]ation|ministry)\b", re.I)
@@ -964,15 +965,17 @@ def _verdict(s: dict) -> tuple[str, str]:
         sample = " That is the slice Cala holds, not its whole record."
     grant = (f" {name} mostly gives grants and loans. A grant next to a round is not a promise to join one, so check what "
              f"the yes covers.") if GRANTS.search(s.get("description") or "") else ""
-    if n + k < MIN_HABIT:
+    if n + k < MIN_HABIT or n < MIN_GRAPH:
+        few = f"Under {MIN_HABIT} rounds is too few to call a habit." if n + k < MIN_HABIT else "That is too few to call a habit."
         return "thin", (f"Cala's graph holds {_plural(n, 'round')} for {name}, and marks it lead in {led}. "
-                        f"Under {MIN_HABIT} rounds is too few to call a habit.{pages}{more}{grant}")
-    count = (f"Cala knows {n + k} rounds for {name} ({n} in its graph, {k} more in reports) and marks it lead in {led}." if k else
-             f"Cala lists {n} rounds for {name}{cap} and marks it lead in {led}.")
+                        f"{few}{pages}{more}{grant}")
+    count = f"Cala lists {n} rounds for {name}{cap} and marks it lead in {led}."
+    if k:   # reports are searched for rounds someone else led, so they would tilt the count towards following
+        count += f" Reports add {k} more that someone else led. Those were looked for, so the habit is counted from Cala's graph alone."
     twice = s.get("duplicates") or 0
     if twice:   # the count is lower than the one Cala returns: say why
         count += f" Cala holds {'one deal' if twice == 1 else f'{twice} deals'} twice, counted once here."
-    rate = led / (n + k)
+    rate = led / n
     if rate >= 0.5:
         return "leads", f"{count}{pages} In Cala it leads more often than it follows, so ask what would make it lead yours.{sample}{grant}"
     if rate >= 0.25:
@@ -1793,7 +1796,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                            "reports": (s.get("knowledge") or {}).get("added") or 0,
                            "usual_leads": [{"name": n, "deals": c} for n, c in counts.most_common(5)],
                            "followed_rounds": sorted(
-                               ({**_round_brief(rd), "leads": [i["name"] for i in rd["investors"] if i["is_lead"]],
+                               ({**_round_brief(rd), "leads": list(dict.fromkeys(i["name"] for i in rd["investors"] if i["is_lead"])),
                                  "leads_on_page": [i["name"] for i in rd["investors"]
                                                    if i["is_lead"] and (i.get("check") or {}).get("status") == "lead"],
                                  "relation": "round" if s["key"] in joined[rid] else "cap_table",

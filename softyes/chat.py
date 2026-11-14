@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime
 import re
 
-from . import extras, graph
+from . import extras, graph, scout
 
 LEADS = 12        # leads a card carries; the rest are on the run's page
 ROUNDS = 60       # rounds the walk drawing carries
@@ -154,6 +154,7 @@ def net_view(r: dict) -> dict | None:
     index: dict[str, int] = {}
 
     def node(name: str) -> int:
+        name = scout._name(name)   # 'UAB Contrarian Ventures' and 'Contrarian Ventures' are one investor
         key = graph.norm(name)
         if key not in index:
             index[key] = len(names)
@@ -227,7 +228,7 @@ def network_text(view: dict) -> str:
     net = view["net"] or {"names": [], "rounds": [], "softs": 0}
     n_soft = net["softs"]
     shared: dict[int, set] = {}
-    led: dict[int, int] = {}
+    led_in: dict[int, set] = {}   # the rounds it led: a name listed twice in a round is one lead
     doors: dict[int, set] = {}
     for i, row in enumerate(net["rounds"]):
         for idx, is_lead, _ in row["i"]:
@@ -236,7 +237,8 @@ def network_text(view: dict) -> str:
             shared.setdefault(idx, set()).add(i)
             doors.setdefault(idx, set()).update(row["m"])
             if is_lead:
-                led[idx] = led.get(idx, 0) + 1
+                led_in.setdefault(idx, set()).add(i)
+    led = {k: len(v) for k, v in led_in.items()}
     names = net["names"]
     softs = " and ".join(s["name"] for s in view["softs"])
     out = [f"# Who {softs} {'has' if len(view['softs']) == 1 else 'have'} sat in a round with, in Cala", "",

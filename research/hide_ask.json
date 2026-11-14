@@ -1,0 +1,387 @@
+{
+ "companies": 30,
+ "any_on_list": 2,
+ "any_in_first": 2,
+ "investors": 162,
+ "investors_on_list": 4,
+ "investors_in_first": 4,
+ "chance_lists": 74,
+ "chance_any": 11,
+ "shown": 18,
+ "rows": [
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Bleu Robotics",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Tolemy Bio",
+   "real": 6,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 34,
+   "other_fields": [
+    0,
+    2
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "bricks.sh",
+   "real": 3,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 37,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Guideless",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "ValkaAI",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 39,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Audrey AI",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Dytto",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "INXM",
+   "real": 4,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 36,
+   "other_fields": [
+    1,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Cloudgeni",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Artificial Societies",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    1
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, Europe",
+   "company": "Faircado",
+   "real": 10,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 30,
+   "other_fields": [
+    0,
+    1
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, anywhere",
+   "company": "ValkaAI",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 35,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, anywhere",
+   "company": "Audrey AI",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 34,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, anywhere",
+   "company": "Dytto",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 34,
+   "other_fields": [
+    0,
+    0
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, anywhere",
+   "company": "Tolemy Bio",
+   "real": 6,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 30,
+   "other_fields": [
+    0,
+    2
+   ]
+  },
+  {
+   "field": "artificial intelligence, PRE_SEED, anywhere",
+   "company": "Brickanta",
+   "real": 24,
+   "on_list": 2,
+   "in_first": 2,
+   "list": 14,
+   "other_fields": [
+    0,
+    3
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Stegra",
+   "real": 19,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 20,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Granarium",
+   "real": 5,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 34,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "B'zeos",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Aurora Powertrains",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    1,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Eqon",
+   "real": 4,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 35,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Renasens",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Tavion",
+   "real": 6,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 33,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "climate tech, SEED, Nordics",
+   "company": "Atmospheric AI",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 38,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "robotics, SEED, Europe",
+   "company": "Genesis AI",
+   "real": 12,
+   "on_list": 2,
+   "in_first": 2,
+   "list": 45,
+   "other_fields": [
+    2,
+    2,
+    0
+   ]
+  },
+  {
+   "field": "robotics, SEED, Europe",
+   "company": "ARX Robotics",
+   "real": 6,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 50,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "robotics, SEED, Europe",
+   "company": "THEKER Robotics",
+   "real": 26,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 30,
+   "other_fields": [
+    2,
+    3,
+    0
+   ]
+  },
+  {
+   "field": "robotics, SEED, Europe",
+   "company": "Acumino",
+   "real": 6,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 50,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "robotics, SEED, Europe",
+   "company": "Mutable Tactics",
+   "real": 1,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 55,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "field": "robotics, SEED, Europe",
+   "company": "Ailos",
+   "real": 2,
+   "on_list": 0,
+   "in_first": 0,
+   "list": 54,
+   "other_fields": [
+    0,
+    0,
+    0
+   ]
+  }
+ ]
+}

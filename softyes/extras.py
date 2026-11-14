@@ -395,8 +395,9 @@ async def _wording(result: dict, lead: dict, kind: str, llm: bool) -> dict:
                          f"the reason as something they know first hand: the most recent round {lead['name']} led that they were in "
                          f"(company, stage, month), and how many such rounds there are if FACTS give more than one. Say 'co-led' when "
                          f"FACTS say co-led. Give no statistics about {lead['name']}: they know the firm. "
-                         f"End with two lines they can forward: '[your company]: [what you do].' and then 'We are raising "
-                         f"[your round]' with that they will follow. 70-100 words. Do not mention Cala.",
+                         f"End with two lines they can forward, worded so they read right for whoever gets them: "
+                         f"'[your company]: [what you do].' and then 'We are raising [your round], and {soft} has said it will "
+                         f"follow.' In those two lines {soft} is named, never 'you'. 70-100 words. Do not mention Cala.",
             "direct": f"A cold email from the founder to a partner at {lead['name']}. Write to them as 'you': {lead['name']} is "
                       f"'you', never its name or 'they'. Open with 'Hi,', then '[your company]: [what you do].' and 'We are raising "
                       f"[your round].' Then say {soft} has told us it will invest once a lead is in. Then why you "
@@ -446,11 +447,24 @@ async def _wording(result: dict, lead: dict, kind: str, llm: bool) -> dict:
         return {**built, "dropped": dropped}
 
 
+def _forwardable(body: str, soft: str) -> str:
+    """The two lines at the end are forwarded, so someone else reads them: there the investor is named, never 'you'."""
+    head, sep, tail = body.rpartition("[your company]: [what you do].")
+    if not sep or not soft:
+        return body
+    tail = re.sub(r"\byou(?: have|['’]ve)? (?:said|told us|mentioned)(?: that)? you(?: will|['’]ll| would) (follow|join|invest)\b",
+                  rf"{soft} has said it will \1", tail, flags=re.I)
+    tail = re.sub(r"\byou (?:will|would) (follow|join)\b", rf"{soft} will \1", tail, flags=re.I)
+    return head + sep + tail
+
+
 async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = True) -> dict:
     """One message per run, lead and kind, the same wherever it is asked for: the run page, the card, the MCP tool.
     Gemini words it once from Cala's facts; code checks it; the founder's own words go into its blanks in code."""
     founder = founder_words(result, founder)
     w = await _wording(result, lead, kind, llm)
+    if kind == "intro_ask":
+        w = {**w, "body": _forwardable(w["body"], (lead.get("ask") or {}).get("name") or "")}
     was = w.get("dropped") or []
     if w.get("model"):
         note = "Written by Gemini. Every name and number in it is in Cala's facts or in your own words below." + \

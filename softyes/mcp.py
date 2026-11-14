@@ -230,8 +230,9 @@ TOOLS = [
      "description": "Draws the network around the founder's investors from Cala: every investor they have sat in a round "
                     "with, who led, and which of the founder's investors can open each door. Use it for \"who do my "
                     "investors know\", \"who have they co-invested with\", \"who can introduce me to X\" (pass target) and "
-                    "\"who is one hop from this fund\" (pass fund, which walks out from that fund). Give run_id from "
-                    "find_lead, or the investors' names.",
+                    "\"who is one hop from this fund\" or \"who does this fund invest with\" (pass fund, which walks out from that "
+                    "fund; never pass a fund the founder has not raised from as investors). Give run_id from find_lead, or "
+                    "the investors' names.",
      "inputSchema": {"type": "object", "properties": {
          "run_id": {"type": "string", "description": "run_id returned by find_lead"},
          "investors": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
@@ -240,14 +241,14 @@ TOOLS = [
      "annotations": READS, "_meta": UI},
     {"name": "draft_intro",
      "title": "Write the intro ask",
-     "description": "After find_lead: writes the message for one lead from that run's checked facts only. kind 'intro_ask' "
-                    "goes to the investor who said yes, asking for the introduction; 'direct' goes to the lead; 'slush' is "
-                    "a meeting note under 300 characters. Returns the message and the facts it was written from. If a mail "
-                    "connector can create drafts, save it as a draft exactly as written; never send it.",
+     "description": "After find_lead: writes the ask for one lead from that run's checked facts only. It goes to the "
+                    "investor who already said yes, asking for the introduction: never a cold message to the lead. kind "
+                    "'slush' is a meeting note under 300 characters. Returns the message and the facts it was written from. "
+                    "If a mail connector can create drafts, save it as a draft exactly as written; never send it.",
      "inputSchema": {"type": "object", "required": ["run_id", "lead"], "properties": {
          "run_id": {"type": "string", "description": "run_id returned by find_lead"},
          "lead": {"type": "string", "description": "The lead's name as find_lead returned it"},
-         "kind": {"type": "string", "enum": ["intro_ask", "direct", "slush"]},
+         "kind": {"type": "string", "enum": ["intro_ask", "slush"]},
          "company": {"type": "string", "description": "The founder's company name"},
          "one_liner": {"type": "string", "description": "What the company does, one sentence"},
          "raising": {"type": "string", "description": "The round being raised, e.g. \"€4M Series A\""},
@@ -445,7 +446,9 @@ class Server:
         background: (None, how far it has got) comes back, and the card asks find_progress for the rest."""
         rid = scout.run_id(inputs)
         stored = extras.blob_get("scout:" + rid, SEARCH_STORED_S)
-        if stored and stored.get("v") == scout.VERSION:
+        # a search whose link pages were still being read is read once more: the pages are kept by then, Cala's answers too
+        again = stored and stored.get("late") and stored.get("late_runs", 0) < 3 and time.time() - stored.get("created", 0) > 40
+        if stored and stored.get("v") == scout.VERSION and not again:
             return stored, {}
         for old in [k for k, v in FINDS.items() if time.time() - v["started"] > 1800]:
             FINDS.pop(old, None)
@@ -471,6 +474,7 @@ class Server:
         async def work() -> dict:
             try:
                 r = await self.search(inputs, emit)
+                r["late_runs"] = ((stored or {}).get("late_runs", 0) + 1) if r.get("late") else 0
                 extras.blob_put("scout:" + rid, r)
                 if r["page_check"]["claims"]:
                     extras.blob_put("check:scout:" + rid, {"page_check": r["page_check"]})
@@ -732,6 +736,8 @@ class Server:
                 return _error("Give run_id from find_lead, or the investors' names.")
             result, _ = await self._walk(inputs)
         view = chat.network_view(result, f"{PUBLIC_URL}/r/{result['run_id']}", str(args.get("target") or "") or None, path)
+        if fund:
+            view["fund"] = result["soft_yeses"][0]["name"]   # walked out from a fund that is not the founder's investor
         text = chat.network_text(view)
         if args.get("target"):
             text += "\n\n" + _door_text(view, str(args["target"]))
@@ -748,7 +754,7 @@ class Server:
         if s.get("usual_leads"):
             out += ["", "Who led when it followed: " + ", ".join(f"{u['name']} ({u['deals']})" for u in s["usual_leads"])]
         for d in (s.get("followed_rounds") or [])[:6]:
-            lead = f", led by {' and '.join(d['leads'])}" if d.get("leads") else ""
+            lead = f", led by {' and '.join(dict.fromkeys(d['leads']))}" if d.get("leads") else ""
             out.append(f"- {_deal(d)}{lead}{_src(d.get('sources') or [])}")
         out += ["", f"Every round and source: {PUBLIC_URL}/r/{result['run_id']}"]
         return {"content": [{"type": "text", "text": "\n".join(out)}],
@@ -769,7 +775,10 @@ class Server:
         lead = self._find_lead(result, str(args.get("lead") or ""))
         if not lead:
             return _error("That run has no such lead. Leads in it: " + ", ".join(e["name"] for e in result["leads"][:12]))
-        kind = args.get("kind") if args.get("kind") in ("intro_ask", "direct", "slush") else "intro_ask"
+        kind = "slush" if args.get("kind") == "slush" else "intro_ask"   # there is no cold message to the lead
+        if kind == "intro_ask" and not (lead.get("ask") or {}).get("name"):
+            return _error(f"None of the investors who said yes sat in a round {lead['name']} led, so there is nobody to ask for this "
+                          "introduction. Pick a lead with a door, or call explore_network to see who opens it.")
         founder = {k: str(args.get(k) or "")[:200] for k in ("company", "one_liner", "raising")}
         d = await extras.draft(result, lead, kind, founder)
         to = {k: str(args.get("to_" + k) or "")[:120] for k in ("name", "email") if args.get("to_" + k)}

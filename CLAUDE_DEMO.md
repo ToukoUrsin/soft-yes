@@ -20,10 +20,12 @@ Say while it draws:
 
 The card comes in about 25 s. Point at:
 
-1. The list. **Ovni Capital** and **Contrarian Ventures** led Bleu Robotics's €5M pre-seed this month. The sentence from thesaasnews.com is under it. Click an investor to open it.
-2. **The way in**, under Ovni. None of Cala AI's investors has sat in a round with Ovni, so the search read further. Point down the chain: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital. Kfund is already Cala AI's investor, so that's three introductions. Each one is a round both sat in. Click a round's name to open its page. **Accel** is one step: 3 rounds with Lightspeed.
-3. The numbers: 1,172 facts from Cala, 15 pages read, 0 from a language model.
-4. The dots next to each investor: one for each thing its own record in Cala says. The line under the graph names them, left to right: your field, leads rounds, pre-seed, active now, round size, near you, a way in. Few dots means Cala has little on that fund. The last dot is a ring when the way in takes two or three introductions. Open an investor and each dot is one line with the count behind it.
+1. The list. **Ovni Capital** and **Contrarian Ventures** led Bleu Robotics's €5M pre-seed two weeks ago. Ovni is already open, with the sentence from thesaasnews.com under it.
+2. **The way in**, under Ovni. None of Cala AI's investors has sat in a round with Ovni, so the search read further. Point down the chain: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital. Kfund is already Cala AI's investor, so that's three introductions. Each one is a round both sat in, and the tick next to it says the page for that round names both funds. Click a round's name to open its page. **Accel** is one step: 3 rounds with Lightspeed.
+3. **Why #1**, right under the chain. This is how we decide who comes first, and it is a sum you can read: 1.79 for leading a pre-seed in a company like yours two weeks ago, 0.84 for Ovni's own pre-seed record in Cala, 0.2 for two rounds this year. Then a little more for being in Europe and for the way in. Every investor has one.
+4. The numbers: 1,172 facts from Cala, 15 pages read, 0 from a language model.
+5. The dots next to each investor: one for each thing its own record in Cala says. The line under the graph names them, left to right: your field, leads rounds, pre-seed, active now, near you, a way in. Few dots means Cala has little on that fund. The last dot is a ring when the way in takes two or three introductions.
+6. Click **All 18 ranked**. The first 12 are investors Cala holds in companies like yours or names for the field. Under the line are 6 found only next to Cala AI's investors, Base10 Partners first: it led Causa Prima's seed with Kfund in the round. **The other 47** names everyone else that was counted.
 
 If they read Claude's text under the card: that is Claude, only the card is checked.
 
@@ -56,7 +58,7 @@ If they ask why a Series B lead is first for a Series A: Emergence also led 4 Se
 - **Open in Gmail**, inside the ask: puts it in a new Gmail message.
 - **Who else opens this door**: the 95 other investors in Tesi and Innovestor's 25 rounds.
 - **Who Ovni Capital invests with**, in an open investor: asks Claude for that fund's network. It takes one Claude turn.
-- **All 18 ranked** and **The 11 companies and what Cala was asked**, under the list: the rest of the list, and the exact question sent to Cala.
+- **All 18 ranked**, **The other 47** and **The 11 companies and what Cala was asked**, under the list: the rest of the list, everyone else that was counted, and the exact question sent to Cala.
 - **Replay** draws it again. **Expand** makes it full screen.
 
 ## If they want more
@@ -65,8 +67,8 @@ All of these answer in seconds:
 
 - `Who could lead Cala AI's next round? Use Soft Yes.` Their own company: 27 leads, Base10 Partners first.
 - `Who led Cala AI's rounds? Use Soft Yes to check each one against the page Cala cites.` Each "led" Cala holds for Cala AI, next to the page's sentence.
-- `I'm starting an AI lab. Which pre-seed investors could Cala AI's investors introduce me to? Use Soft Yes.` Techstars, Northzone, Base10 Partners first.
-- `We build climate tech in the Nordics and raise a seed round. Tesi and Innovestor know us. Use Soft Yes to find investors.` Lifeline Ventures first: it led Verda's Series A with Tesi in the round.
+- `I'm starting an AI lab. Which pre-seed investors could Cala AI's investors introduce me to? Use Soft Yes.` Northzone, Techstars and 20VC first.
+- `We build climate tech in the Nordics and raise a seed round. Tesi and Innovestor know us. Use Soft Yes to find investors.` Leitmotif, BackingMinds and Course Corrected first, all in Nordic climate companies. Lifeline Ventures is under the line: it sits next to Tesi, but Cala holds it in no climate company.
 
 ## Reset
 

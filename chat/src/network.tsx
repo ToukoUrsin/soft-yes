@@ -133,7 +133,8 @@ export function Network({ data, roomy, canExpand, onExpand, onBack }: {
   }
 
   const hopped = stack.length > 1
-  const title = hopped ? `One hop from ${d.softs.map((s) => s.name).join(', ')}` : 'Your network, through Cala'
+  const theirs = !!d.fund && !hopped
+  const title = hopped ? `One hop from ${d.softs.map((s) => s.name).join(', ')}` : theirs ? `Who ${d.fund} invests with` : 'Your network, through Cala'
   const others = everyone.length
   return (
     <div class="card card--net" ref={ref}>
@@ -180,7 +181,7 @@ export function Network({ data, roomy, canExpand, onExpand, onBack }: {
                 )
               }))}
             </svg>
-            <span class="g__h" style={{ left: 0, width: `${col.i[1]}px`, textAlign: 'right' }}>{hopped ? 'From' : 'Your investors'}</span>
+            <span class="g__h" style={{ left: 0, width: `${col.i[1]}px`, textAlign: 'right' }}>{hopped || theirs ? 'From' : 'Your investors'}</span>
             <span class="g__h" style={{ left: `${col.f[0]}px` }}>One round away</span>
             <span class="g__h g__h--r" style={{ right: 0 }}>{wide ? 'Shared rounds' : 'Rounds'}</span>
             {softs.map((name, i) => (

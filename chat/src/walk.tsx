@@ -281,7 +281,7 @@ function LeadCard({ l, open, onToggle, onDraft, onNet, busy, short, full, ask, o
           {l.caution && <p class="caution">{l.caution}</p>}
           {ask ? <div class="ask"><DraftBody data={ask} onClose={onCloseAsk} proofAbove={!!e?.quote} /></div> : (
             <div class="acts">
-              <Btn kind="main" icon="mail" busy={busy} onClick={() => onDraft(l)}>Draft the ask{l.door && !short ? ` to ${l.door.name}` : ''}</Btn>
+              {l.door && <Btn kind="main" icon="mail" busy={busy} onClick={() => onDraft(l)}>Draft the ask{!short ? ` to ${l.door.name}` : ''}</Btn>}
               <Btn icon="net" onClick={() => onNet(l)}>{short ? 'Who else opens it' : 'Who else opens this door'}</Btn>
             </div>
           )}
@@ -412,7 +412,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
   const names = d.softs.map((s) => s.name)
   const draft = async (l: Lead) => {
     setBusy(l.key)
-    const got = await writeAsk({ run_id: d.run_id, lead: l.name, kind: l.door ? 'intro_ask' : 'direct', company: d.company, raising: raisingOf(d.stage_name) })
+    const got = await writeAsk({ run_id: d.run_id, lead: l.name, kind: 'intro_ask', company: d.company, raising: raisingOf(d.stage_name) })
     if (got) {
       setAsks((a) => ({ ...a, [l.key]: got }))
       setBusy(null)
@@ -495,7 +495,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
 
       <footer class="foot">
         <div class="foot__l">
-          {!roomy && phase >= PHASE.done && d.leads.length > shown.length && <button type="button" class="more" onClick={() => setAll(true)}>All {Math.min(d.leads.length, 12)} of {d.leads_total}</button>}
+          {!roomy && phase >= PHASE.done && d.leads.length > shown.length && <button type="button" class="more" onClick={() => setAll(true)}>{d.leads.length >= d.leads_total ? `All ${d.leads_total}` : `The first ${d.leads.length} of ${d.leads_total}`}</button>}
           {!roomy && all && d.leads.length > 3 && <button type="button" class="more" onClick={() => setAll(false)}>Show fewer</button>}
           <button type="button" class="more" onClick={() => onNetwork()}><Icon name="net" size={13} />Explore the network</button>
         </div>

@@ -1,5 +1,7 @@
 # Soft Yes film plan (max 1:55)
 
+**For the cold open (note of 14.11 23:50 EET):** the film to show starts in Claude, not on the home page. Its first frame is the white Claude window on #0A0A0A (scene `ask` in `film/src/scenes3.tsx`), which is what `/bulk3/runs/opens/final/softyes/open.mp4` already cuts into, and its first line is still "You're raising a pre-seed round. Who do you talk to? Ask Claude." The shots are being recorded again tonight because the card changed (the search now shows chains of introductions, 1,172 facts instead of 294); the first frame and the first line stay the same. The film without the open is about 66 s, so with the 10 s open it stays well under 2:00. Nothing is called final before the open is in front.
+
 The film to show is `film/out/demo-3.mp4` (69 s, inside Claude; see the last section). The plan below is the website cut, `film/out/demo-2.mp4` (87 s). Every number below was read from https://soft-yes.fly.dev on 14 Nov 2026.
 
 ## The story in 3 lines

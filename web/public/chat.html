@@ -134,7 +134,7 @@ body.embed .chat { padding: 0; max-width: none; gap: 14px; }
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>
       </button>
     </form>
-    <p class="fine">A preview, not the product: no language model here. What you send goes straight to Soft Yes, and every fact in the card is Cala’s.</p>
+    <p class="fine">A preview of the cards Claude draws. Every fact in a card is Cala’s. Only a drafted message is worded by a model, and each name and number in it is checked.</p>
   </div>
 </div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-h">
@@ -321,7 +321,7 @@ body.embed .chat { padding: 0; max-width: none; gap: 14px; }
       it('In your own assistant this lands in your mail drafts, unsent. This chat has no mailbox, so it only marks the lead as asked.', true)
       return step('round_tracker', { run_id: state.run, tracker: state.tracker || undefined, updates: state.lead ? [{ investor: state.lead, status: 'asked', via: state.door || undefined }] : [] })
     }
-    if ((m = /show who (.+?) has sat in rounds with/i.exec(text))) return step('explore_network', { fund: m[1].trim() })
+    if ((m = /show who (.+?) (?:has sat in rounds with|invests with)/i.exec(text))) return step('explore_network', { fund: m[1].trim() })
     if (state.run && /network|know|co-?invest|door|one hop/i.test(text)) {
       m = /(?:to|from|reach|introduce me to)\s+([A-Z][\w&.\- ]+?)\??$/.exec(text)
       return step('explore_network', m ? { run_id: state.run, target: m[1].trim() } : { run_id: state.run })

@@ -114,9 +114,9 @@ export function Answer({
       <div className="answer__msg">
         <div className="answer__msghead">
           <h2>The message</h2>
-          <p>{lead.ask ? `To ${lead.ask.name}, asking for the introduction` : `To ${lead.name}, citing the shared deal`}</p>
+          <p>{lead.ask ? `To ${lead.ask.name}, asking for the introduction` : `Cala shows none of your investors in a round ${lead.name} led, so there’s nobody to ask.`}</p>
         </div>
-        <DraftPane lead={lead} result={result} kind={lead.ask ? 'intro_ask' : 'direct'} onChange={() => onOpen('reach')} wait={!settled} />
+        {lead.ask && <DraftPane lead={lead} result={result} kind="intro_ask" onChange={() => onOpen('reach')} wait={!settled} />}
       </div>
       {children}
     </section>

@@ -15,7 +15,7 @@ Soft Yes is a connector for Claude. You ask in the chat and the answer is a card
 1. asks Cala's graph for companies like yours,
 2. reads their rounds and who invested, and the rounds joined by investors you already know,
 3. reads Cala's own record of each investor it lists,
-4. ranks them by what that record says: backs your field, leads rounds, at your stage, active now, your round size, near you, and a way in through someone you know. No shared round? It reads further in the graph, up to three introductions, each one a round both funds sat in.
+4. ranks them by what that record says: backs your field, leads rounds, at your stage, active now, near you, and a way in through someone you know. Open an investor and the card shows the sum that put it there. No shared round? It reads further in the graph, up to three introductions, each one a round both funds sat in, and says if the page for that round names both.
 
 **Who could lead?** Every founder hears it: "We like it. We're in once you have a lead." Name the investors who told you that. Soft Yes then
 
@@ -57,6 +57,8 @@ We tested the walk on rounds that already happened. Each of 201 past rounds was 
 - From two investors who joined, the real lead was on the list in 13 of 57 rounds (23%). A lead picked at random from the same year is there 10% of the time.
 - From one it was 8 of 144 (6%), against 4% at random: too close to chance to count.
 - Over all 201 rounds the real lead was in the top five in 10.
+
+The investor search does not pass that kind of test, and we say so. We hid each of 30 companies in turn and asked by its field, stage and place: one of its own investors was on the list for 2 of the 30, no better than a list for another field (11 of 74). It shows who backs companies like yours and how to reach them. It does not predict who will back one company. `research/tools/hide_ask.py` reruns it from the cache.
 
 So name two investors, and read the list as doors your investors can open, not as a forecast. The numbers, three hits and a miss are at the bottom of [/audit](https://soft-yes.fly.dev/audit#backtest). `uv run python -m softyes.backtest --dry` recomputes them from the cache with no Cala call.
 
