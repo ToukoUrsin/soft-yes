@@ -11,9 +11,11 @@ const ORDER = ['field', 'leads', 'stage', 'recent', 'size', 'place', 'path']
 /** Text assembled at the server uses the typewriter apostrophe; the card sets it as type. */
 const ty = (s?: string | null) => (s || '').replace(/'/g, '’')
 const NAMED = '~cala'   // the node for investors Cala's own answer names, with no company of the list behind them
+const VIA = '~via'      // the node for the investors the founder knows: the rounds they sat in lead to the way in
 
+type Left = FindCompany | typeof NAMED | typeof VIA
 interface LinkRow { c: number; i: number; ok: boolean; led: boolean }
-interface Plan { cos: (FindCompany | null)[]; invs: FindInvestor[]; links: LinkRow[]; cols: string[]; moreCos: number; moreInvs: number }
+interface Plan { cos: Left[]; invs: FindInvestor[]; links: LinkRow[]; cols: string[]; moreCos: number; moreInvs: number }
 
 function plan(d: FindData, maxC: number, maxI: number): Plan {
   const invs = d.investors.slice(0, maxI)
@@ -31,17 +33,22 @@ function plan(d: FindData, maxC: number, maxI: number): Plan {
   const count = new Map<string, number>()
   of.forEach((m) => m.forEach((_, name) => count.set(name, (count.get(name) ?? 0) + 1)))
   const order = [...d.companies].sort((a, b) => (count.get(b.name) ?? 0) - (count.get(a.name) ?? 0) || b.rounds.length - a.rounds.length)
-  const loose = invs.some((x, i) => of[i].size === 0 && x.named_by_cala)
-  const cos: (FindCompany | null)[] = order.slice(0, loose ? maxC - 1 : maxC)
-  if (loose) cos.push(null)
-  const at = new Map(cos.map((c, i) => [c ? c.name : NAMED, i]))
+  const loose = invs.some((x, i) => of[i].size === 0 && x.named_by_cala && !x.path.length)
+  const via = invs.some((x) => x.path.length > 0)
+  const room = maxC - (loose ? 1 : 0) - (via ? 1 : 0)
+  const cos: Left[] = order.slice(0, room)
+  if (loose) cos.push(NAMED)
+  if (via) cos.push(VIA)
+  const at = new Map(cos.map((c, i) => [typeof c === 'string' ? c : c.name, i]))
   const links: LinkRow[] = []
   of.forEach((m, i) => {
     m.forEach((v, name) => { const c = at.get(name); if (c != null) links.push({ c, i, ...v }) })
-    if (m.size === 0 && invs[i].named_by_cala && at.has(NAMED)) links.push({ c: at.get(NAMED)!, i, ok: false, led: false })
+    const way = invs[i].path[0]
+    if (way) links.push({ c: at.get(VIA)!, i, ok: !!way.led && ok(way.status), led: !!way.led })
+    else if (m.size === 0 && invs[i].named_by_cala && at.has(NAMED)) links.push({ c: at.get(NAMED)!, i, ok: false, led: false })
   })
   const cols = ORDER.filter((id) => invs.some((x) => x.signals.some((s) => s.id === id)))
-  return { cos, invs, links, cols, moreCos: Math.max(0, d.companies.length - (loose ? maxC - 1 : maxC)), moreInvs: Math.max(0, d.investors_total - invs.length) }
+  return { cos, invs, links, cols, moreCos: Math.max(0, d.companies.length - room), moreInvs: Math.max(0, d.investors_total - invs.length) }
 }
 
 const PHASE = { rest: 0, ask: 1, cos: 2, invs: 3, read: 4, done: 5 } as const
@@ -96,25 +103,31 @@ function Graph({ p, phase, read, hot, setHot, onPick, width, d }: {
           const on = !lit || (lit.kind === 'c' ? l.c === lit.n : l.i === lit.n)
           const seen = phase >= PHASE.done || (phase === PHASE.read && l.i <= read)
           return <path key={n} d={curve(col.c[1] + 5, yC(l.c), col.i[0] - 5, yI(l.i))} pathLength={1}
-            class={`lk lk--f${seen && l.ok ? ' is-ok' : ''}${p.cos[l.c] ? '' : ' lk--named'}${on ? '' : ' is-dim'}`} style={{ '--d': `${l.i * 60}ms` }} />
+            class={`lk lk--f${seen && l.ok ? ' is-ok' : ''}${p.cos[l.c] === NAMED ? ' lk--named' : p.cos[l.c] === VIA ? ' lk--via' : ''}${on ? '' : ' is-dim'}`} style={{ '--d': `${l.i * 60}ms` }} />
         })}
       </svg>
       <span class="g__h" style={{ left: 0, width: `${col.c[1]}px`, textAlign: 'right' }}>{d.ask.like.length && !d.ask.sector ? 'Companies you named' : wide ? 'Companies like yours' : 'Like yours'}</span>
       <span class="g__h" style={{ left: `${col.i[0]}px` }}>Investors</span>
       <span class="g__h g__h--r" style={{ right: 0 }}>Signals</span>
 
-      {p.cos.map((c, i) => (
-        <button key={c ? c.id : NAMED} type="button" class={`n n--co${c ? '' : ' n--named'}${lit && !lit.cos.has(i) ? ' is-dim' : ''}`}
-          style={{ top: `${yC(i) - rowC / 2}px`, height: `${rowC}px`, left: 0, width: `${col.c[1]}px`, '--i': i }}
-          onMouseEnter={() => setHot(`c:${i}`)} onFocus={() => setHot(`c:${i}`)} onClick={() => setHot(hot === `c:${i}` ? null : `c:${i}`)}
-          title={c ? c.description || c.name : 'Investors Cala’s answer names for this field'}>
-          <span class="n__t">
-            <b class="n__name">{c ? c.name : 'Cala’s own answer'}</b>
-            {wide && <span class="n__sub">{c ? [c.where, c.rounds[0] ? [c.rounds[0].stage_name, c.rounds[0].money].filter(Boolean).join(' ') : plural(c.investors_listed, 'investor')].filter(Boolean).join(' · ') : 'investors it names'}</span>}
-          </span>
-          <i class="n__dot" />
-        </button>
-      ))}
+      {p.cos.map((c, i) => {
+        const whose = d.ask.via_company ? `${d.ask.via_company}’s investors` : 'Your investors'
+        const name = c === NAMED ? 'Cala’s own answer' : c === VIA ? whose : c.name
+        const sub = c === NAMED ? 'investors it names' : c === VIA ? `${plural(d.counts.way_rounds ?? 0, 'round')} they sat in`
+          : [c.where, c.rounds[0] ? [c.rounds[0].stage_name, c.rounds[0].money].filter(Boolean).join(' ') : plural(c.investors_listed, 'investor')].filter(Boolean).join(' · ')
+        const title = c === NAMED ? 'Investors Cala’s answer names for this field' : c === VIA ? `Rounds ${listAnd(d.ask.mine.slice(0, 4))} sat in, and who led or joined them` : c.description || c.name
+        return (
+          <button key={typeof c === 'string' ? c : c.id} type="button" class={`n n--co${c === NAMED ? ' n--named' : c === VIA ? ' n--via' : ''}${lit && !lit.cos.has(i) ? ' is-dim' : ''}`}
+            style={{ top: `${yC(i) - rowC / 2}px`, height: `${rowC}px`, left: 0, width: `${col.c[1]}px`, '--i': i }}
+            onMouseEnter={() => setHot(`c:${i}`)} onFocus={() => setHot(`c:${i}`)} onClick={() => setHot(hot === `c:${i}` ? null : `c:${i}`)} title={title}>
+            <span class="n__t">
+              <b class="n__name">{name}</b>
+              {wide && <span class="n__sub">{sub}</span>}
+            </span>
+            <i class="n__dot" />
+          </button>
+        )
+      })}
 
       {p.invs.map((x, i) => {
         const seen = phase >= PHASE.done || (phase === PHASE.read && i <= read)
@@ -203,6 +216,7 @@ function Reading({ d, p, phase, read, typed }: { d: FindData; p: Plan; phase: nu
 function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boolean; onToggle: () => void; short: boolean; onNet: (x: FindInvestor) => void }) {
   const cites = [
     ...x.deals.map((dl) => ({ what: [dl.company, dl.stage_name, month(dl.date), dl.money].filter(Boolean).join(', ') + (dl.led ? ', led' : ''), src: dl.url ? { url: dl.url, publisher: dl.publisher } : dl.sources[0] })),
+    ...(x.ways || []).map((dl) => ({ what: [dl.company, dl.stage_name, month(dl.date), dl.money].filter(Boolean).join(', ') + (dl.led ? ', led' : '') + `, with ${listAnd(dl.with.slice(0, 2))}`, src: dl.url ? { url: dl.url, publisher: dl.publisher } : dl.sources[0] })),
     ...x.backed.map((b) => ({ what: `${b.company}, listed as an investor`, src: b.sources[0] })),
   ].filter((r) => r.src?.url).slice(0, 4)
   return (
@@ -367,7 +381,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
       <Head
         title={`Investors for ${words || 'your round'}`}
         sub={d.investors.length
-          ? <><b>{num(d.investors_total)}</b> investors around <b>{num(d.counts.companies)}</b> {d.counts.companies === 1 ? 'company' : 'companies'} like yours, ranked by what Cala’s graph says of each. {way}</>
+          ? <><b>{num(d.investors_total)}</b> investors around <b>{num(d.counts.companies)}</b> {d.counts.companies === 1 ? 'company' : 'companies'} like yours{d.counts.way_rounds ? <> and <b>{num(d.counts.way_rounds)}</b> rounds {d.ask.via_company ? `${d.ask.via_company}’s` : 'your'} investors sat in</> : null}, ranked by what Cala’s graph says of each.{d.counts.way_rounds ? '' : ` ${way}`}</>
           : d.headline}
         right={<>
           {phase >= PHASE.done && !still && <button type="button" class="tool" onClick={() => setRun(run + 1)} title="Play the search again"><Icon name="replay" size={14} />Replay</button>}

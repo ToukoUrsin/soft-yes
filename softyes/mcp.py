@@ -70,7 +70,9 @@ INSTRUCTIONS = (
     "company\", \"who invests in companies like ours\", \"who could X's investors introduce me to\"): call find_investors "
     "right away with the field in two or three plain words, the stage and the place if they said them, companies like "
     "theirs if they named any, and the investors or the company they already know. Do not ask questions first. It draws "
-    "the list in the chat with each investor's signals, so do not repeat it.\n"
+    "the list in the chat with each investor's signals, so do not repeat it. Make this one call only: given a company or "
+    "investors the founder knows, find_investors itself reads the rounds those investors sat in and marks who they could "
+    "introduce, so do not also call find_lead or explore_network. The chat shows one drawing per answer.\n"
     "1. The soft yeses. If the founder names the investors, call find_lead with those names right away. If they ask "
     "about a company by name, call find_lead with company right away. In both cases do not search mail first, do not "
     "ask which company it is for, and use only what is said in this chat, nothing from memory. Only when they name "
@@ -174,8 +176,10 @@ TOOLS = [
                     "part, who led), every \"led\" is checked against the page Cala cites, and each investor's own record "
                     "in Cala is read. Returns investors ranked by signals counted from the graph: backed companies like "
                     "the founder's, leads rounds, invests at this stage, active in the last 12 months, round size, where "
-                    "it sits, and a way in (a round it shared with an investor the founder already knows). Draws the "
-                    "search and the list in the chat. Give sector, or like, or both.",
+                    "it sits, and a way in (a round it led or sat in with an investor the founder already knows, or with "
+                    "an investor in a company the founder knows: \"who could X's investors introduce us to\"). Draws the "
+                    "search and the list in the chat. Give sector, or like, or both. One call answers both who fits and "
+                    "who can introduce them.",
      "inputSchema": {"type": "object", "properties": {
          "sector": {"type": "string", "description": "The field in two or three plain words, e.g. \"artificial intelligence\", "
                                                      "\"climate tech\", \"fintech\""},
@@ -195,7 +199,9 @@ TOOLS = [
                     "Cala cites, and returns who could lead now, ranked, with the sentence that proves it and which of "
                     "the founder's investors opens the door. Draws the walk in the chat. Give the investors as names, or "
                     "as soft_yeses when they come from the founder's mail (search the mail first if no names were given "
-                    "and a mail connector is available). With only a company, starts from the investors Cala lists in it.",
+                    "and a mail connector is available). With only a company, starts from the investors Cala lists in it. "
+                    "Not for a founder asking which investors fit what they build, also when they name a company whose "
+                    "investors could introduce them: that is find_investors alone.",
      "inputSchema": {"type": "object", "properties": {
          "investors": {"type": "array", "maxItems": 6, "items": {"type": "string"},
                        "description": "Names of the investors who gave a soft yes, e.g. [\"Tesi\", \"Innovestor\"]"},

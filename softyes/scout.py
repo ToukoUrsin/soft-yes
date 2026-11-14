@@ -25,9 +25,13 @@ LOOKUPS = 8               # names Cala gave without an id that are looked up
 ROUNDS_PER_COMPANY = 3    # of each, the rounds nearest the asked stage
 OWN_RECORDS = 16          # investors whose own record in Cala is read
 INVESTOR_LOOKUPS = 8      # investors Cala named without an id that are looked up by name
-SHOWN = 16
+SHOWN = 18
 MINE = 8                  # the founder's own investors whose rounds are read for a way in
 RECENT_MONTHS = 18
+PATH_ROUNDS = 4     # rounds near the asked stage, per investor the founder knows, read for who led them
+PATH_TOTAL = 16
+NAMED_RECORDS = 6   # of the own records, the ones kept for investors Cala only names
+WAY_RECORDS = 8     # own records read for investors found only through those rounds
 NOT_EQUITY = re.compile(r"grant|debt|loan|crowdfund|ico|token|post-ipo|secondary", re.I)
 
 Emit = Callable[[dict], Awaitable[None]]
@@ -67,7 +71,7 @@ def run_id(inputs: dict) -> str:
     key = {"sector": (inputs.get("sector") or "").lower().strip(), "stage": inputs.get("stage"),
            "place": (inputs.get("place") or "").lower().strip(),
            "like": sorted(graph.norm(n) for n in inputs.get("like") or []),
-           "mine": sorted(sorted(m["ids"]) for m in inputs.get("mine") or []), "v": 5}
+           "mine": sorted(sorted(m["ids"]) for m in inputs.get("mine") or []), "v": 11}
     return "f" + hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:9]
 
 
@@ -110,7 +114,8 @@ def where(address: str | None) -> dict | None:
             code = code or BY_NAME[low]
         elif low in US_STATES or (q in STATE_CODES and len(parts) > 1):
             code = code or "US"
-        elif not q or re.fullmatch(r"[A-Z]{2}(-[A-Z0-9]{1,3})?", q) or re.search(r"\d", q) or STREET.search(q):
+        elif not q or re.fullmatch(r"[A-Z]{2}(-[A-Z0-9]{1,3})?", q) or re.search(r"\d", q) or STREET.search(q) \
+                or re.fullmatch(r"(?:[A-Za-z]{1,2}\.\s?){1,3}[A-Za-z]{0,2}", q):   # 'a.s.', 's.r.o.': a legal form after a comma
             continue   # a region code ('ES-M'), or a street
         else:
             city = q.title() if q.isupper() else q
@@ -174,6 +179,12 @@ def _money_span(deals: list[dict]) -> str | None:
     lo, hi = min(sized, key=lambda d: d["amount"]), max(sized, key=lambda d: d["amount"])
     a, b = walk._money(lo["amount"], lo["currency"]), walk._money(hi["amount"], hi["currency"])
     return a if a == b else f"{a} to {b}"
+
+
+def _st(stage_name: str | None) -> str:
+    """A round's name inside a sentence: 'seed', 'pre-seed', 'Series A'."""
+    name = stage_name or "round"
+    return name if name.startswith("Series") else name.lower()
 
 
 def _list(names: list[str], n: int = 3) -> str:
@@ -272,6 +283,37 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         except CalaError:
             return None
 
+    # 0. the investors the founder knows: their records, and the rounds near this stage they sat in without leading.
+    #    Whoever led one of those has invested next to them: that is a way in. Read while Cala answers the field questions.
+    async def known() -> tuple[dict[str, set], list[tuple[list[str], dict]]]:
+        rounds_of: dict[str, set] = {}
+        if not mine:
+            return rounds_of, []
+        pairs = [(m, i) for m in mine for i in m["ids"][:2]]
+        theirs = await asyncio.gather(*(read(graph.investor, i) for _, i in pairs))
+
+        def far(r: dict) -> int:
+            st = _stage_of(r.get("label"))
+            if not st:
+                return 9
+            return abs(graph.STAGE_ORDER.index(st) - graph.STAGE_ORDER.index(want)) if want else 0
+        near: dict[str, list[str]] = {}
+        for (m, _), inv in zip(pairs, theirs):
+            if not inv:
+                continue
+            rounds_of.setdefault(m["name"], set()).update(r["id"] for r in inv["rounds"])
+            rows = [r for r in inv["rounds"] if not r["is_lead"] and not NOT_EQUITY.search(r.get("label") or "") and far(r) <= 1]
+            rows.sort(key=lambda r: _first_report(r["sources"]) or "", reverse=True)
+            rows.sort(key=far)
+            for r in rows[:PATH_ROUNDS]:
+                if m["name"] not in near.setdefault(r["id"], []):
+                    near[r["id"]].append(m["name"])
+        ids = list(near)[:PATH_TOTAL]
+        rds = await asyncio.gather(*(read(graph.funding_round, rid) for rid in ids))
+        return rounds_of, [(near[rid], rd) for rid, rd in zip(ids, rds) if rd and (rd.get("issuer") or {}).get("name")]
+
+    known_task = asyncio.create_task(known())
+
     # 1. the companies like the founder's: the ones they named, then the ones Cala names for the field
     named = [{"name": n, "id": None, "from": "you"} for n in dict.fromkeys(str(x).strip() for x in inputs.get("like") or []) if len(n) > 1]
     await say(t="step", step="field", sector=sector, place=place, stage=want)
@@ -325,16 +367,20 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         if not any(walk._same_deal(rd, k) for k in c["_rounds"]):   # one deal Cala holds as two round entities counts once
             c["_rounds"].append(rd)
     all_rounds = [rd for c in companies for rd in c["_rounds"]]
-    await say(t="step", step="rounds", rounds=len(all_rounds), companies=len(companies))
+    rounds_of, ways = await known_task
+    by_id = {rd["id"]: rd for rd in all_rounds}
+    ways = [(names, by_id.get(rd["id"], rd)) for names, rd in ways]   # a round read both ways is one round
+    way_rounds = [rd for _, rd in ways if rd["id"] not in by_id]
+    await say(t="step", step="rounds", rounds=len(all_rounds) + len(way_rounds), companies=len(companies))
 
     # 3. the page Cala cites for each "led"
-    checks = await pagecheck.check_rounds(all_rounds, walk.PAGE_SECONDS)
+    checks = await pagecheck.check_rounds(all_rounds + way_rounds, walk.PAGE_SECONDS)
     tally, findings, claims = collections.Counter(), [], []
-    for rd in all_rounds:
+    for rd in all_rounds + way_rounds:
         walk._apply_check(rd, checks.get(rd["id"]), tally)
     for c in companies:
         walk._set_aside_stages(c["_rounds"])
-    for rd in all_rounds:
+    for rd in all_rounds + way_rounds:
         walk._note_check(rd, checks.get(rd["id"]), findings, claims)
     await say(t="step", step="pages", pages=tally["pages"], confirmed=tally["lead"], corrected=tally["corrected"])
 
@@ -373,12 +419,35 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
                 c["backed"].append({"company": co["name"], "company_id": co["id"],
                                     "sources": [{k: s.get(k) for k in ("publisher", "url", "date")} for s in inv["sources"][:2]]})
 
+    # whoever led or sat in a round one of the founder's known investors sat in: the funds they have invested next to.
+    # A "led" the cited page gives to someone else counts as taking part.
+    via_key = graph.norm(via_company or "")
+    for names, rd in ways:
+        issuer = rd["issuer"]["name"]
+        if via_key and graph.norm(issuer) == via_key:
+            continue
+        for i in rd["investors"]:
+            ck = i.get("check") or {}
+            led_it = bool(i["is_lead"]) and ck.get("status") != "other"
+            if not led_it and i["kind"] == "person":
+                continue
+            c = cand(i["name"], i["id"], i["kind"])
+            if c is None:
+                continue
+            c.setdefault("ways", []).append({
+                "company": issuer, "company_id": rd["issuer"].get("id"), "round": rd["id"], "stage": rd["stage"], "stage_name": rd["stage_name"],
+                "date": rd["date"], "amount": rd["amount"], "currency": rd["currency"], "led": led_it, "with": names,
+                "status": ck.get("status"), "quote": ck.get("quote"), "url": ck.get("url"), "publisher": ck.get("publisher"),
+                "led_by": ck.get("led_by"),
+                "sources": [{k: s.get(k) for k in ("publisher", "url", "date")} for s in (i["sources"] or rd["sources"])[:2]]})
+
     def weight(d: dict) -> float:
         w = walk._stage_weight(d["stage"], want) * walk._recency(d["date"])
         return w * (1.8 * walk.CHECK_WEIGHT.get(d["status"] or "unread", 0.7) if d["led"] else 1.0)
 
     for c in cands.values():
-        c["base"] = sum(weight(d) for d in c["deals"]) + 0.35 * len(c["backed"])
+        c["ways"] = sorted(sorted(c.get("ways") or [], key=lambda d: d["date"] or "", reverse=True), key=lambda d: not d["led"])
+        c["base"] = sum(weight(d) for d in c["deals"]) + 0.35 * len(c["backed"]) + sum((0.6 if d["led"] else 0.4) * weight(d) for d in c["ways"][:3])
     # The investors Cala's answers name. Nothing is claimed for them yet: each one's own record is read below.
     told = sorted((x for x in fld["investors"] if graph.norm(x["name"]) not in co_keys), key=lambda x: (x["id"] is None, x["asked"]))
     for x in told:
@@ -398,12 +467,15 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         if c is not None:
             c["named"] = True
             c.setdefault("base", 0.0)
+            c.setdefault("ways", [])
 
     # 5. each front-runner's own record in Cala, and where it sits
     by_deals = sorted((c for c in cands.values() if c["ids"] and (c["deals"] or c["backed"])), key=lambda c: (-c["base"], c["name"]))
-    by_name = [c for c in cands.values() if c["ids"] and not c["deals"] and not c["backed"]]
-    front = by_deals[:OWN_RECORDS - min(len(by_name), OWN_RECORDS // 2)]
+    by_name = [c for c in cands.values() if c["ids"] and not c["deals"] and not c["backed"] and not c["ways"]]
+    by_way = sorted((c for c in cands.values() if c["ids"] and c["ways"] and not c["deals"] and not c["backed"]), key=lambda c: (-c["base"], c["name"]))
+    front = by_deals[:OWN_RECORDS - min(len(by_name), NAMED_RECORDS)]
     front += by_name[:OWN_RECORDS - len(front)]
+    front += by_way[:WAY_RECORDS]
     await say(t="step", step="investors", investors=len(cands), reading=[c["name"] for c in front])
     owns = await asyncio.gather(*(read(graph.investor, c["ids"].most_common(1)[0][0]) for c in front))
     profs = await asyncio.gather(*(read(graph.profile, c["ids"].most_common(1)[0][0]) for c in front))
@@ -432,30 +504,31 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             c["website"] = prof.get("website")
             c["description"] = graph.fix_text(prof.get("description"))
 
-    # 6. a way in: a round one of the founder's own investors sat in with it
+    # 6. a way in: a round it led with one of the founder's known investors in it, or a round they both sat in
     if mine:
-        pairs = [(m, i) for m in mine for i in m["ids"][:2]]
-        theirs = await asyncio.gather(*(read(graph.investor, i) for _, i in pairs))
-        rounds_of: dict[str, set] = {}
-        for (m, _), inv in zip(pairs, theirs):
-            if inv:
-                rounds_of.setdefault(m["name"], set()).update(r["id"] for r in inv["rounds"])
-        for c in front:
+        in_front = {c["key"] for c in front}
+        for c in cands.values():
+            if c["key"] not in in_front and not c["ways"]:
+                continue
             mine_in = {}
-            ids = set((c.get("own") or {}).get("round_ids") or []) | {d["round"] for d in c["deals"]}
+            ids = set((c.get("own") or {}).get("round_ids") or []) | {d["round"] for d in c["deals"]} | {d["round"] for d in c["ways"]}
             for name, held in rounds_of.items():
                 both = ids & held
                 if both:
                     mine_in[name] = sorted(both)
             c["path"] = []
-            if not mine_in:
-                continue
+            for w in c["ways"]:
+                for name in w["with"]:
+                    if name not in [p["via"] for p in c["path"]]:
+                        c["path"].append({"via": name, "rounds": max(1, len(mine_in.get(name) or [])), "company": w["company"],
+                                          "stage_name": w["stage_name"], "date": w["date"], "led": w["led"], "status": w["status"]})
             # name one shared round per investor: the company and the year, read from the round itself
-            first = [(name, rids[0]) for name, rids in sorted(mine_in.items(), key=lambda kv: -len(kv[1]))][:2]
+            first = [(name, rids[0]) for name, rids in sorted(mine_in.items(), key=lambda kv: -len(kv[1]))
+                     if name not in [p["via"] for p in c["path"]]][:2]
             shared = await asyncio.gather(*(read(graph.funding_round, rid) for _, rid in first))
-            c["path"] = [{"via": name, "rounds": len(mine_in[name]),
-                          "company": ((rd or {}).get("issuer") or {}).get("name"), "stage_name": (rd or {}).get("stage_name"),
-                          "date": (rd or {}).get("date")} for (name, _), rd in zip(first, shared)]
+            c["path"] += [{"via": name, "rounds": len(mine_in[name]),
+                           "company": ((rd or {}).get("issuer") or {}).get("name"), "stage_name": (rd or {}).get("stage_name"),
+                           "date": (rd or {}).get("date"), "led": False} for (name, _), rd in zip(first, shared)]
 
     # 7. the signals, and the order they give
     stage_name = graph.STAGE_NAMES.get(want or "", None)
@@ -469,7 +542,8 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         also = (own or {}).get("also") or []
         names = list(dict.fromkeys([d["company"] for d in deals] + [b["company"] for b in c["backed"]]))
         n_field = len(names) + len(also)
-        if not n_field and not (own and (own["at_stage"] if want else own["rounds"])):
+        ways_led = c["ways"]
+        if not n_field and not ways_led and not (own and (own["at_stage"] if want else own["rounds"])):
             continue   # Cala named it, but its record holds no company of this field and no round at this stage
         sig = []
         # the field
@@ -539,11 +613,18 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             path = c.get("path") or []
             if path:
                 p = path[0]
-                what = " ".join(x for x in (f"{p['company']}'s" if p.get("company") else "", (p.get("stage_name") or "round").lower(),
+                what = " ".join(x for x in (f"{p['company']}'s" if p.get("company") else "", _st(p.get("stage_name")),
                                             f"({p['date'][:4]})" if p.get("date") else "") if x)
                 who = f"{p['via']}, an investor in {via_company}" if via_company else p["via"]
-                sig.append({"id": "path", "label": "A way in", "on": True,
-                            "text": f"Sat in {walk._plural(p['rounds'], 'round')} with {who}: {what}", "via": [x["via"] for x in path]})
+                if p.get("led"):
+                    when_p = f" in {walk._month(p['date'])}" if p.get("date") else ""
+                    said = "Led" if p.get("status") in walk.CONFIRMED else "Cala has it leading"
+                    text = f"{said} {p['company']}'s {_st(p.get('stage_name'))}{when_p} with {who} in the round"
+                    if p["rounds"] > 1:
+                        text += f"; {p['rounds']} rounds together in Cala"
+                else:
+                    text = f"Sat in {walk._plural(p['rounds'], 'round')} with {who}: {what}"
+                sig.append({"id": "path", "label": "A way in", "on": True, "text": text, "via": [x["via"] for x in path]})
             elif own:
                 whom = f"{via_company}'s investors" if via_company else \
                     (_list([m["name"] for m in mine], 3) if len(mine) <= 3 else f"any of your {len(mine)} investors")
@@ -556,17 +637,22 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             score *= 1.15
         if c.get("path"):
             score *= 1.25
-        proof = next((d for d in led if d["status"] == "lead" and d.get("quote")), None)
+        proof = next((d for d in led + [w for w in ways_led if w["led"]] if d["status"] == "lead" and d.get("quote")), None)
         top = led[0] if led else (deals[0] if deals else None)
         if top:
             when = f" in {walk._month(top['date'])}" if top["date"] else ""
             held = top["status"] in ("lead", "report")   # a "led" the cited page does not bear out is Cala's word only
-            line = (f"Led {top['company']}'s {top['stage_name'].lower()}{when}" if top["led"] and held
-                    else f"Cala says it led {top['company']}'s {top['stage_name'].lower()}{when}; the page it cites does not say so" if top["led"]
-                    else f"In {top['company']}'s {top['stage_name'].lower()}{when}")
+            line = (f"Led {top['company']}'s {_st(top['stage_name'])}{when}" if top["led"] and held
+                    else f"Cala says it led {top['company']}'s {_st(top['stage_name'])}{when}; the page it cites does not say so" if top["led"]
+                    else f"In {top['company']}'s {_st(top['stage_name'])}{when}")
             rest = n_field - 1
             if rest > 0:
                 line += f", and backed {rest} more of these companies"
+        elif ways_led:
+            w = ways_led[0]
+            when = f" in {walk._month(w['date'])}" if w["date"] else ""
+            said = "In" if not w["led"] else "Led" if w["status"] in walk.CONFIRMED else "Cala has it leading"
+            line = f"{said} {w['company']}'s {_st(w['stage_name'])}{when}, with {_list(w['with'], 2)} in the round"
         elif n_field:
             line = f"Cala lists it as an investor in {_list(names + [x['company'] for x in also])}"
         elif want and own["led_at_stage"]:
@@ -581,12 +667,14 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             "proof": {k: proof.get(k) for k in ("company", "stage_name", "date", "quote", "url", "publisher")} if proof else None,
             "deals": [{k: d.get(k) for k in ("company", "stage_name", "date", "led", "status", "quote", "url", "publisher", "led_by", "sources")}
                       | {"money": walk._money(d["amount"], d["currency"]) if d["amount"] else None} for d in deals[:6]],
+            "ways": [{k: d.get(k) for k in ("company", "stage_name", "date", "led", "status", "quote", "url", "publisher", "led_by", "sources", "with")}
+                     | {"money": walk._money(d["amount"], d["currency"]) if d["amount"] else None} for d in ways_led[:4]],
             "backed": (c["backed"] + also)[:6], "hq": (hq or {}).get("text"), "website": c.get("website"), "description": c.get("description"),
             "own": {k: own[k] for k in ("rounds", "led", "at_stage", "led_at_stage", "capped", "portfolio", "recent")} if own else None,
             "path": c.get("path") or []})
     out.sort(key=lambda x: (-x["score"], -((x["own"] or {}).get("rounds") or 0), x["kind"] == "person", x["name"]))
     # the list shows the investors whose record or rounds were read; one only listed on a cap table is counted, not ranked
-    read_ones = [x for x in out if x["own"] or x["deals"]]
+    read_ones = [x for x in out if x["own"] or x["deals"] or x["ways"]]
     shown = read_ones[:SHOWN] if len(read_ones) >= 5 else out[:SHOWN]
     for n, x in enumerate(shown, 1):
         x["rank"] = n
@@ -604,10 +692,10 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
                             "sources": [{k: s.get(k) for k in ("publisher", "url", "date")} for s in rd["sources"][:2]]}
                            for rd in sorted(c["_rounds"], key=lambda rd: rd["date"] or "", reverse=True)]}
 
-    facts = sum(2 + len(rd["investors"]) + len(rd["sources"]) for rd in all_rounds) + sum(4 + len(c["investors"]) for c in companies) \
+    facts = sum(2 + len(rd["investors"]) + len(rd["sources"]) for rd in all_rounds + way_rounds) + sum(4 + len(c["investors"]) for c in companies) \
         + sum((c.get("own") or {}).get("rounds", 0) for c in front)
     top = shown[0] if shown else None
-    rounds_read = len(all_rounds) + sum((c.get("own") or {}).get("rounds", 0) for c in front)
+    rounds_read = len(all_rounds) + len(way_rounds) + sum((c.get("own") or {}).get("rounds", 0) for c in front)
     if not companies:
         headline = (f"Cala named no company for {sector}." if sector else "Cala does not know these companies.") + \
             " Try other words for the field, or name two or three companies like yours."
@@ -616,6 +704,8 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
     else:
         line = top["line"] if top["line"].startswith("Cala") else top["line"][0].lower() + top["line"][1:]
         cos = "1 company like yours" if n_cos == 1 else f"{n_cos} companies like yours"
+        if ways:
+            cos += f" and the rounds {via_company + chr(39) + 's' if via_company else 'your'} investors sat in"
         headline = (f"{walk._plural(len(out), 'investor')} around {cos}, read from {walk._plural(rounds_read, 'round')} in Cala. "
                     f"Start with {top['name']}: {line}.")
     result = {
@@ -625,7 +715,7 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         "queries": fld["queries"], "headline": headline, "companies": [co_view(c) for c in companies],
         "investors": shown, "investors_total": len(out),
         "counts": {"companies": n_cos, "named_by_cala": len(asked), "rounds": len(all_rounds), "rounds_read": rounds_read,
-                   "investors": len(out),
+                   "investors": len(out), "ways": sum(1 for x in out if x["path"]), "way_rounds": len(ways),
                    "leads": sum(1 for x in out if x["led_here"]), "own_records": sum(1 for c in front if c.get("own"))},
         "check": {"rounds": tally["rounds"], "pages": tally["pages"], "confirmed": tally["lead"], "corrected": tally["corrected"],
                   "unstated": tally["unstated"] + tally["absent"], "unread": tally["unread"] + tally["off"]},
@@ -670,7 +760,16 @@ def text(r: dict, url: str) -> str:
         if x.get("proof"):
             p = x["proof"]
             out.append(f"   - The page says: \"{p['quote']}\" ({p['url']})")
+    more = [x for x in r["investors"][8:] if x.get("path")]
+    if more:
+        out += ["", "Further down the list, with a way in:"]
+        for x in more[:6]:
+            way = next(s["text"] for s in x["signals"] if s["id"] == "path")
+            out.append(f"{x['rank']}. **{x['name']}**: {way}.")
     ck = r["check"]
+    if a.get("mine"):
+        out += ["", "This one answer covers both who fits and the way in. Do not call find_lead or explore_network for the same question: "
+                    "the chat shows one drawing per answer."]
     out += ["", f"{ck['pages']} pages read: {ck['confirmed']} lead claims confirmed word for word, {ck['corrected']} corrected.",
             f"{r['ledger']['facts']} facts from Cala, none from a language model. The list is drawn in the chat with every source; "
             "do not repeat it. Say in two or three sentences who to start with and why, using only the lines above.",

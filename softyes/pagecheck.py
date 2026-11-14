@@ -83,13 +83,17 @@ SPELLED = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six"
 DIGITS = {v: k for k, v in SPELLED.items()}
 
 
+LEGAL_FIRST = re.compile(r"^(UAB|OÜ|SIA|AS|AB|Oy|SAS|SA|GmbH)\s+(?=\S)")
+
+
 def variants(name: str) -> list[str]:
     """Ways a page may write the investor: the full name, and the name without its fund or company words when what
     is left is distinctive ('Lifeline', 'Ten Eleven', 'Goldman Sachs'), never a common word ('World', 'True')."""
     name = re.sub(r"\s*\(.*?\)\s*", " ", name)
     name = re.sub(r"\s+gesellschaft mit beschränkter haftung\b.*$", "", name, flags=re.I).strip()
-    words = name.split()
-    out = [name]
+    bare = LEGAL_FIRST.sub("", name).strip()   # 'UAB Contrarian Ventures' is written 'Contrarian Ventures'
+    out = [name] + ([bare] if bare and bare != name and len(bare.split()) > 1 else [])
+    words = (bare if len(out) > 1 else name).split()
     while len(words) > 1 and graph.norm(words[-1]) in graph.FUND_WORDS | graph.LEGAL | graph.TAIL | ENDINGS:
         words = words[:-1]
         rest = " ".join(words)

@@ -192,6 +192,7 @@ b { font-weight: 600; }
 .g--find .n--co .n__dot { border-color: var(--ink3); }
 .g--find .n--named .n__name { color: var(--ink2); font-weight: 500; }
 .g--find .n--named .n__dot { border-style: dashed; }
+.g--find .n--via .n__dot { background: var(--ink); border-color: var(--ink); }
 .lk--named { stroke-dasharray: .03 .03; opacity: 0; transition: opacity .6s ease var(--d, 0ms), stroke-opacity .2s; }
 .g--find.is-invs .lk--named { opacity: 1; }
 .g--find .n--inv.is-ok .n__dot { background: var(--good); border-color: var(--good); }

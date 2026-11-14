@@ -155,7 +155,8 @@ export interface FindInvestor {
   website?: string | null
   description?: string | null
   own?: { rounds: number; led: number; at_stage: number; led_at_stage: number; capped: boolean; portfolio: number; recent: number } | null
-  path: { via: string; rounds: number; company?: string | null; stage_name?: string | null; date?: string | null }[]
+  ways?: (FindDeal & { with: string[] })[]
+  path: { via: string; rounds: number; company?: string | null; stage_name?: string | null; date?: string | null; led?: boolean; status?: string | null }[]
 }
 export interface FindCompany {
   id: string
@@ -197,7 +198,7 @@ export interface FindData {
   companies: FindCompany[]
   investors: FindInvestor[]
   investors_total: number
-  counts: { companies: number; named_by_cala: number; rounds: number; rounds_read: number; investors: number; leads: number; own_records: number }
+  counts: { companies: number; named_by_cala: number; rounds: number; rounds_read: number; investors: number; leads: number; own_records: number; ways?: number; way_rounds?: number }
   check: { rounds: number; pages: number; confirmed: number; corrected: number; unstated: number; unread: number }
   fixes: Fix[]
   ledger: { cala_calls?: number; fresh?: number; cached?: number; facts?: number; llm: number }
