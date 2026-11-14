@@ -126,7 +126,7 @@ function Graph({ d, p, phase, checked, hot, setHot, onLead, width, roomy }: {
       <svg class="g__links" width={width} height={H} aria-hidden="true">
         {links.map((l, i) => <path key={i} d={l.d} pathLength={1} class={`${l.cls}${l.on ? '' : ' is-dim'}`} style={{ '--d': `${l.delay}ms` }} />)}
       </svg>
-      <span class="g__h" style={{ left: 0, width: `${col.i[1]}px`, textAlign: 'right' }}>Said yes</span>
+      <span class="g__h" style={{ left: 0, width: `${col.i[1]}px`, textAlign: 'right' }}>{d.softs.every((s) => s.from === 'cala') ? 'Already in' : 'Said yes'}</span>
       <span class="g__h g__h--mid" style={wide ? { left: `${col.r[0]}px` } : { left: `${col.r[0] - 60}px`, width: '120px', textAlign: 'center' }}>
         {wide ? 'Rounds they joined' : 'Rounds'}
       </span>
@@ -328,14 +328,25 @@ function Fixes({ fixes }: { fixes: Fix[] }) {
   )
 }
 
-export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
-  data: WalkData; roomy: boolean; fit: number; canExpand: boolean; onExpand: () => void; onNetwork: (focus?: string) => void
+/** A chat takes a card off the page when it scrolls away and puts it back later. The walk draws itself once per call;
+ *  put back, it is simply there. */
+function drawn(id: string, set?: boolean): boolean {
+  if (!id) return false
+  try {
+    if (set) sessionStorage.setItem(`sy:drawn:${id}`, '1')
+    return sessionStorage.getItem(`sy:drawn:${id}`) === '1'
+  } catch { return false }
+}
+
+export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwork }: {
+  data: WalkData; cardId: string; roomy: boolean; fit: number; canExpand: boolean; onExpand: () => void; onNetwork: (focus?: string) => void
 }) {
+  const once = `${cardId && d.run_id ? `${cardId}:${d.run_id}` : ''}`
   const tight = fit >= 1
   const tiny = fit >= 2
   const [ref, width] = useWidth<HTMLDivElement>()
   const still = reduced()
-  const [phase, setPhase] = useState<number>(still ? PHASE.done : PHASE.rest)
+  const [phase, setPhase] = useState<number>(still || drawn(once) ? PHASE.done : PHASE.rest)
   const [checked, setChecked] = useState(-1)
   const [hot, setHot] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(tight ? null : d.leads[0]?.key ?? null)
@@ -353,6 +364,7 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
     timers.current.forEach(clearTimeout)
     timers.current = []
     if (still || !width) return
+    if (run === 0 && drawn(once)) { setPhase(PHASE.done); return }
     const at = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms))
     setPhase(PHASE.rest)
     setChecked(-1)
@@ -373,6 +385,7 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
     at(t + 200, () => setPhase(PHASE.done))
     return () => timers.current.forEach(clearTimeout)
   }, [run, width > 0, p, still])
+  useEffect(() => { if (phase >= PHASE.done) drawn(once, true) }, [phase, once])
 
   const skip = () => {
     if (phase >= PHASE.done) return
@@ -408,12 +421,13 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
 
   const shown = all || roomy ? d.leads : d.leads.slice(0, tight ? 2 : 3)
   const from = d.ledger.inbox > 0 ? 'inbox' : d.softs.some((s) => s.from === 'cala') ? 'cala' : 'typed'
-  const title = d.stage_name ? `Who could lead your ${d.stage_name === 'Seed' || d.stage_name === 'Pre-seed' ? d.stage_name.toLowerCase() : d.stage_name}` : 'Who could lead your round'
+  const whose = from === 'cala' && d.company ? `${d.company}’s` : 'your'
+  const title = d.stage_name ? `Who could lead ${whose} ${d.stage_name === 'Seed' || d.stage_name === 'Pre-seed' ? d.stage_name.toLowerCase() : d.stage_name}` : `Who could lead ${whose} round`
   return (
     <div class="card card--walk" ref={ref}>
       <Head
         title={title}
-        sub={<>{listAnd(names)} said yes once there is a lead. <b>{d.leads_total}</b> investors led rounds they joined{d.leading_now ? <>, <b>{d.leading_now}</b> are leading now</> : null}.</>}
+        sub={<>{from === 'cala' ? `Cala lists ${listAnd(names)} in ${d.company || 'the company'}` : `${listAnd(names)} said yes once there is a lead`}. <b>{d.leads_total}</b> investors led rounds they joined{d.leading_now ? <>, <b>{d.leading_now}</b> are leading now</> : null}.</>}
         right={<>
           {phase >= PHASE.done && !still && <button type="button" class="tool" onClick={() => setRun(run + 1)} title="Play the walk again"><Icon name="replay" size={14} />Replay</button>}
           {canExpand && <button type="button" class="tool" onClick={onExpand} title="Open in full"><Icon name="expand" size={14} />Expand</button>}

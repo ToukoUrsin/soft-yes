@@ -31,13 +31,28 @@ function askTitle(d: DraftData) {
 }
 
 /** The ask itself: the mail, every fact in it with its source, and the ways out. `onClose` when it sits inside another card. */
+/** What the founder typed into an ask's blanks, kept in this browser so the next ask has it too. */
+function mine(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem('sy:mine') || '{}') || {} } catch { return {} }
+}
+const HINT: Record<string, string> = { '[your company]': 'Its name', '[what you do]': 'builds … for …, in a few words' }
+
 export function DraftBody({ data: d, onClose, proofAbove }: { data: DraftData; onClose?: () => void; proofAbove?: boolean }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [fill, setFill] = useState<Record<string, string>>(() => { const m = mine(); return Object.fromEntries(d.placeholders.map((p) => [p, m[p] || ''])) })
   const { to, kind } = askTitle(d)
-  const text = (d.subject ? `Subject: ${d.subject}\n\n` : '') + d.body
+  const put = (p: string, v: string) => {
+    setFill((f) => ({ ...f, [p]: v }))
+    setState('idle')
+    try { localStorage.setItem('sy:mine', JSON.stringify({ ...mine(), [p]: v })) } catch { /* a chat that gives the card no storage */ }
+  }
+  const filled = (s: string) => d.placeholders.reduce((t, p) => (fill[p]?.trim() ? t.split(p).join(fill[p].trim()) : t), s)
+  const body = filled(d.body)
+  const left = d.placeholders.filter((p) => !fill[p]?.trim())
+  const text = (d.subject ? `Subject: ${filled(d.subject)}\n\n` : '') + body
 
   const gmail = () => {
-    const q = [d.to.email ? `to=${encodeURIComponent(d.to.email)}` : '', d.subject ? `su=${encodeURIComponent(d.subject)}` : '', `body=${encodeURIComponent(d.body)}`]
+    const q = [d.to.email ? `to=${encodeURIComponent(d.to.email)}` : '', d.subject ? `su=${encodeURIComponent(filled(d.subject))}` : '', `body=${encodeURIComponent(body)}`]
     openLink(`https://mail.google.com/mail/?view=cm&fs=1&${q.filter(Boolean).join('&')}`)
   }
   const copy = async () => {
@@ -54,9 +69,14 @@ export function DraftBody({ data: d, onClose, proofAbove }: { data: DraftData; o
       setState(done ? 'copied' : 'failed')
     }
   }
-  useEffect(() => {
-    tell(`The Soft Yes ${kind.toLowerCase()} to ${to} about ${d.lead.name} is on screen, written from checked facts only. If asked to save it as a mail draft, save exactly this and do not send it:\n\n${text}`)
-  }, [d])
+  const share = () => tell(`The Soft Yes ${kind.toLowerCase()} to ${to} about ${d.lead.name} is on screen, written from checked facts only. If asked to save it as a mail draft, save exactly this and do not send it:\n\n${text}`)
+  useEffect(() => { share() }, [d])
+  // a blank still open is shown as one, so nobody sends "[your company]" by accident
+  const gaps = (para: string) => {
+    if (!left.length) return para
+    const parts = para.split(new RegExp(`(${left.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`))
+    return parts.map((x, i) => (left.includes(x) ? <mark key={i} class="gap">{x}</mark> : x))
+  }
 
   return (
     <>
@@ -69,8 +89,22 @@ export function DraftBody({ data: d, onClose, proofAbove }: { data: DraftData; o
       <article class="mail">
         {d.to.email && <p class="mail__row"><span>To</span><b>{d.to.email}</b></p>}
         {d.subject && <p class="mail__row"><span>Subject</span><b>{d.subject}</b></p>}
-        <div class="mail__body">{d.body.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}</div>
-        {d.placeholders.length > 0 && <p class="mail__gap">Still yours to fill in: {d.placeholders.join(', ')}</p>}
+        <div class="mail__body">{body.split(/\n{2,}/).map((para, i) => <p key={i}>{gaps(para)}</p>)}</div>
+        {d.placeholders.length > 0 && (
+          <div class="fill">
+            <span class="fill__h">{left.length ? 'Yours to fill in' : 'Filled in by you'}</span>
+            {d.placeholders.map((p) => {
+              const label = p.replace(/^\[|\]$/g, '')
+              return (
+                <label key={p}>
+                  <span>{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+                  <input type="text" value={fill[p] || ''} placeholder={HINT[p] || ''} autocomplete="off" spellcheck={false}
+                    onInput={(e) => put(p, (e.target as HTMLInputElement).value)} onBlur={share} />
+                </label>
+              )
+            })}
+          </div>
+        )}
       </article>
 
       <section class="facts">

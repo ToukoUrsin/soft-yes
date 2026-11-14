@@ -9,7 +9,7 @@ export interface HostContext {
   platform?: 'web' | 'desktop' | 'mobile'
   safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
   styles?: { variables?: Record<string, string | undefined>; css?: { fonts?: string } }
-  toolInfo?: { tool?: { name?: string } }
+  toolInfo?: { id?: string | number; tool?: { name?: string } }
   locale?: string
 }
 

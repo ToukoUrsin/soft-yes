@@ -379,7 +379,7 @@ function SoftYesAsk({ config }: { config: Config | null }) {
         </p>
         {config?.mcp && (
           <div className="home__mcp">
-            <p>Soft Yes is also an MCP server. Add this address to your own assistant and ask it who could lead your round.</p>
+            <p>Use it inside Claude. Add this address as a custom connector (Customize, Connectors) and ask who could lead your round. The walk draws in your chat.</p>
             <div className="copyfield">
               <code className="truncate" title={config.mcp}>{config.mcp}</code>
               <CopyButton text={config.mcp} label="Copy" className="btn btn--ghost btn--sm" />

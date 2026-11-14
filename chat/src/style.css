@@ -269,7 +269,14 @@ b { font-weight: 600; }
 .mail__row b { font-weight: 550; overflow-wrap: anywhere; }
 .mail__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-top: 12px; font-size: 14px; line-height: 1.55; }
 .mail__body p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.mail__gap { margin-top: 12px; font-size: 12.5px; color: var(--ink3); }
+.mail__body mark.gap { background: var(--tint2); color: var(--ink2); border-radius: 4px; padding: 0 3px; }
+.fill { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px 10px; }
+.fill__h { grid-column: 1 / -1; font-size: 12px; color: var(--ink3); }
+.fill label { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; font-size: 12px; color: var(--ink3); min-width: 0; }
+.fill input { width: 100%; min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line2); border-radius: var(--r-md); background: transparent; color: var(--ink); font: inherit; font-size: 13.5px; }
+.fill input::placeholder { color: var(--ink3); opacity: .8; }
+.fill input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-color: transparent; }
+@media (max-width: 460px) { .fill { grid-template-columns: minmax(0, 1fr); } }
 .facts { margin: 16px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .facts ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .facts li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 13px; color: var(--ink2); }

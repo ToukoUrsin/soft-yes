@@ -44,10 +44,13 @@ INSTRUCTIONS = (
     "Soft Yes gets a founder from investors who said \"we're in once you have a lead\" to a lead and a filled round. "
     "Every fact comes from Cala's funding graph and is checked against the page Cala cites. No fact is stated by a "
     "language model, so add none of your own.\n\n"
-    "1. Find the soft yeses. If the founder names no investors and a mail connector such as Gmail is available, search "
-    "their mail for investor replies that commit once there is a lead (\"we're in once you have a lead\", \"happy to "
-    "follow\", \"come back when you have a lead\", \"we would join the round\"). Pass each one to find_lead in "
-    "soft_yeses with the firm, the person, the date and the exact sentence. Never invent one. Nothing found: ask for names.\n"
+    "1. The soft yeses. If the founder names the investors, call find_lead with those names right away. If they ask "
+    "about a company by name, call find_lead with company right away. In both cases do not search mail first, do not "
+    "ask which company it is for, and use only what is said in this chat, nothing from memory. Only when they name "
+    "neither an investor nor a company and a mail connector such as Gmail is available, search their mail for "
+    "investor replies that commit once there is a lead (\"we're in once you have a lead\", \"happy to follow\", "
+    "\"come back when you have a lead\", \"we would join the round\"), and pass each one to find_lead in soft_yeses "
+    "with the firm, the person, the date and the exact sentence. Never invent one. Nothing found: ask for names.\n"
     "2. Call find_lead. It draws the walk in the chat, so do not repeat its lists. Say in two or three sentences who to "
     "start with and why.\n"
     "3. Call explore_network when the founder asks who their investors know, who is one hop from a fund, or who can "
@@ -59,6 +62,60 @@ INSTRUCTIONS = (
     "6. check_claim verifies who led a company's round against the page Cala cites, for a founder or for an investor "
     "who received an ask."
 )
+
+# Starter questions. A chat lists them under the connector (in Claude: + > Soft Yes), so nobody has to know what to type.
+# Each one is only the founder's sentence; left empty, it asks with an example that is known to hold.
+PROMPTS = [
+    {"name": "find-a-lead", "title": "Find who could lead my round",
+     "description": "From the investors who said they're in once you have a lead. Leave it empty to try Tesi and Innovestor.",
+     "arguments": [{"name": "investors", "description": "Who said yes, e.g. Tesi, Innovestor", "required": False},
+                   {"name": "round", "description": "The round, e.g. Seed or Series A", "required": False}]},
+    {"name": "next-round", "title": "Who could lead a company's round",
+     "description": "Starts from the investors already in the company. Leave it empty to try Cala AI.",
+     "arguments": [{"name": "company", "description": "The company, e.g. Cala AI", "required": False}]},
+    {"name": "who-led", "title": "Check who led a company's rounds",
+     "description": "Each 'led' Cala holds, next to the sentence on the page it cites. Leave it empty to try Cala AI.",
+     "arguments": [{"name": "company", "description": "The company, e.g. Cala AI", "required": False}]},
+    {"name": "my-network", "title": "Who do my investors know",
+     "description": "The rounds your investors joined and who sat in them. Leave it empty to try Tesi and Innovestor.",
+     "arguments": [{"name": "investors", "description": "Your investors, e.g. Tesi, Innovestor", "required": False}]},
+    {"name": "from-my-mail", "title": "Find the soft yeses in my mail",
+     "description": "Needs a mail connector. Reads who said they're in once you have a lead, then finds the lead."},
+    {"name": "my-round", "title": "Where does my round stand",
+     "description": "The round tracker: who is in, who is asked, what is left."},
+]
+
+
+def _spoken(v, default: str) -> str:
+    """'Tesi, Innovestor' as a founder says it: 'Tesi and Innovestor'."""
+    parts = [x.strip() for x in re.split(r",|;|\band\b|&", str(v or "")) if x.strip()]
+    if not parts:
+        return default
+    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
+
+
+def _prompt_text(name: str, args: dict) -> str | None:
+    company = str(args.get("company") or "").strip() or "Cala AI"
+    if name == "find-a-lead":
+        given = str(args.get("investors") or "").strip()
+        rnd = str(args.get("round") or "").strip() or ("" if given else "Series A")
+        rnd = "round" if not rnd else rnd if re.match(r"series", rnd, re.I) else f"{rnd.lower().removesuffix(' round')} round"
+        return (f"{_spoken(given, 'Tesi and Innovestor')} said they're in once we have a lead. "
+                f"Use Soft Yes to find who could lead our {rnd}.")
+    if name == "next-round":
+        return f"Who could lead {company}'s next round? Use Soft Yes, starting from the investors already in."
+    if name == "who-led":
+        return f"Who led {company}'s rounds? Use Soft Yes to check each one against the page Cala cites."
+    if name == "my-network":
+        who = _spoken(args.get("investors"), "Tesi and Innovestor")
+        return (f"Who {'do' if ' and ' in who else 'does'} {who} know? "
+                f"Use Soft Yes to show the network and who opens which door.")
+    if name == "from-my-mail":
+        return ("Look in my mail for investors who said they're in once we have a lead. "
+                "Then use Soft Yes to find who could lead the round.")
+    if name == "my-round":
+        return "Use Soft Yes to show where my round stands."
+    return None
 
 SOFT_YES = {"type": "object", "required": ["investor"], "properties": {
     "investor": {"type": "string", "description": "The investor's firm, e.g. \"Kfund\""},
@@ -619,7 +676,8 @@ class Server:
         if method == "initialize":
             asked = params.get("protocolVersion")
             return ok({"protocolVersion": asked if asked in VERSIONS else VERSIONS[0],
-                       "capabilities": {"tools": {"listChanged": False}, "resources": {"listChanged": False, "subscribe": False}},
+                       "capabilities": {"tools": {"listChanged": False}, "resources": {"listChanged": False, "subscribe": False},
+                                        "prompts": {"listChanged": False}},
                        "serverInfo": {"name": "soft-yes", "title": "Soft Yes", "version": "2.0.0"},
                        "instructions": INSTRUCTIONS})
         if method == "ping":
@@ -651,7 +709,13 @@ class Server:
         if method == "resources/templates/list":
             return ok({"resourceTemplates": []})
         if method == "prompts/list":
-            return ok({"prompts": []})
+            return ok({"prompts": PROMPTS})
+        if method == "prompts/get":
+            meta = next((p for p in PROMPTS if p["name"] == params.get("name")), None)
+            text = _prompt_text(params.get("name"), params.get("arguments") or {}) if meta else None
+            if not text:
+                return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"Unknown prompt: {params.get('name')}"}}
+            return ok({"description": meta["title"], "messages": [{"role": "user", "content": {"type": "text", "text": text}}]})
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method not found: {method}"}}
 
 

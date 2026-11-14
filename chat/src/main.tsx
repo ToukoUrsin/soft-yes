@@ -70,6 +70,7 @@ function App() {
   }, [])
 
   const tool = ctx.toolInfo?.tool?.name || ''
+  const cardId = ctx.toolInfo?.id != null ? String(ctx.toolInfo.id) : ''   // one per call the assistant made
   // while the walk is out, ask the server how far it has got
   useEffect(() => {
     if (data || fail || !args || (tool && tool !== 'find_lead')) return
@@ -119,7 +120,7 @@ function App() {
   if (side) return <Network data={side} roomy={full} canExpand={canExpand} onExpand={expand} onBack={() => setSide(null)} />
   switch (data.view) {
     case 'walk':
-      return <Walk data={data} roomy={full} fit={level} canExpand={canExpand} onExpand={expand}
+      return <Walk data={data} cardId={cardId} roomy={full} fit={level} canExpand={canExpand} onExpand={expand}
         onNetwork={(focus) => setSide(networkOf(data, focus))} />
     case 'network':
       return <Network data={data} roomy={full} canExpand={canExpand} onExpand={expand} />
