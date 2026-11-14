@@ -87,6 +87,13 @@ def family(name: str) -> str | None:
     return base
 
 
+CASING = {"capitalg": "CapitalG", "byfounders": "byFounders", "softbank": "SoftBank", "openai": "OpenAI", "nordicninja": "NordicNinja",
+          "icebreaker.vc": "Icebreaker.vc", "maki.vc": "Maki.vc", "b2venture": "b2venture",
+          "seedcamp": "Seedcamp", "paypal": "PayPal", "linkedin": "LinkedIn", "github": "GitHub", "nvidia": "Nvidia",
+          "salesforce": "Salesforce", "blackrock": "BlackRock", "j.p.": "J.P.", "jpmorgan": "JPMorgan", "hv": "HV", "gv": "GV",
+          "eqt": "EQT", "dn": "DN", "ivp": "IVP", "nea": "NEA", "dst": "DST", "bpifrance": "Bpifrance", "iconiq": "ICONIQ"}
+
+
 def pretty(name: str) -> str:
     """'NORDICNINJA VC LIMITED' -> 'Nordicninja VC', 'VNV Global AB (publ)' -> 'VNV Global'. Mixed case is kept."""
     name = re.sub(r"\s*\((publ|uk|us|usa|eu|de|fr|se|fi)\)", "", (name or "").strip(), flags=re.I)
@@ -108,6 +115,7 @@ def pretty(name: str) -> str:
     if name.isupper() and not (len(words) == 1 and len(words[0]) <= 4):
         words = [w.upper() if w.lower() in ACRONYMS or (len(w) <= 3 and len(words) > 1 and w.isalpha() and n == 0)
                  else w.capitalize() for n, w in enumerate(words)]
+    words = [CASING.get(w.lower(), w) for w in words]   # names a firm writes its own way, however Cala holds them
     return " ".join(words).rstrip(",")
 
 

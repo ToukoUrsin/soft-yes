@@ -121,21 +121,40 @@ def _find(text: str, phrase: str) -> list[int]:
 BREAK = re.compile(r"(?<=[a-zäöåéü0-9)\]\"”’%€$]{2})[.!?]\s+(?=[A-ZÄÖÅÉÜ\"“(\[0-9])|\n")
 
 
+# A full stop after one of these does not end a sentence: "Oct. 28, 2026", "Calif. — Nominal", "Inc. The round".
+ABBR = re.compile(r"(?<![\w])(?:jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|calif|mass|wash|inc|corp|ltd|co|no|st|vs|approx|est|mr|ms|dr)$", re.I)
+
+
+SPACED = re.compile(r"[ \t]+([,.;])(?=[ \t\n]|$|[\"”’)])")
+
+
+def tidy(text: str) -> str:
+    """A page's markup leaves a space before a comma or a full stop ('led by <a>Sofina</a> , the'): the reader never sees it."""
+    return re.sub(r"(?<=s) (['’])(?= )", r"\1", SPACED.sub(r"\1", text or ""))   # "Menlo Ventures ' Anthology fund"
+
+
+def _breaks(text: str, lo: int, hi: int):
+    for m in BREAK.finditer(text, lo, hi):
+        if text[m.start()] == "." and ABBR.search(text[max(lo, m.start() - 8):m.start()]):
+            continue
+        yield m
+
+
 def _sentence(text: str, at: int) -> tuple[int, int]:
-    """The sentence around text[at]. 'U.S. Investor' and 'Inc. said' do not end one."""
+    """The sentence around text[at]. 'U.S. Investor', 'Inc. said' and 'Oct. 28' do not end one."""
     lo, start = max(0, at - 700), max(0, at - 700)
-    for m in BREAK.finditer(text, lo, at):
+    for m in _breaks(text, lo, at):
         start = m.end()
-    m = BREAK.search(text, at, min(len(text), at + 700))
+    m = next(_breaks(text, at, min(len(text), at + 700)), None)
     end = m.start() + 1 if m else min(len(text), at + 700)
     for _ in range(3):   # a line break in the middle of a sentence: "The round\nwas led by X, with existing\ninvestors"
         if start > lo and text[start - 1] == "\n" and text[start:start + 1].islower():
             prev = lo
-            for m in BREAK.finditer(text, lo, start - 1):
+            for m in _breaks(text, lo, start - 1):
                 prev = m.end()
             start = prev
         elif end < len(text) and text[end - 1:end] == "\n" and text[end:end + 40].lstrip()[:1].islower():
-            m = BREAK.search(text, end, min(len(text), end + 400))
+            m = next(_breaks(text, end, min(len(text), end + 400)), None)
             end = m.start() + 1 if m else min(len(text), end + 400)
         else:
             break
@@ -228,6 +247,7 @@ def read(text: str, investor: str, company: str | None = None, stage: str | None
     """What the page says about `investor`, and the sentence it rests on. status:
     lead      the page says it led            follower  the page names another lead and lists it in the round
     named     named, no word on who led       absent    not on the page"""
+    text = tidy(text)
     hits = sorted({sp for v in variants(investor) for sp in _spans(text, v)})
     if not hits:
         return {"status": "absent", "quote": None}
@@ -256,13 +276,32 @@ def read(text: str, investor: str, company: str | None = None, stage: str | None
     return out
 
 
+CHROME = re.compile(r"^(?:skip to (?:main )?content|jump to content|toggle navigation|menu|search)\b[\s:|·-]*", re.I)
+
+
 def _trim(sent: str, at: int) -> str:
+    """The sentence as it reads on the page: at most 330 characters around the name, cut between words, without the
+    spaces a page's markup leaves before a comma or a full stop, and without a 'Skip to content' link in front."""
     lead_in = len(sent) - len(sent.lstrip())
     sent, at = sent.strip(), max(0, at - lead_in)
+    m = CHROME.match(sent)
+    if m and m.end() <= at:
+        sent, at = sent[m.end():], at - m.end()
     if len(sent) > 330:
         a = max(0, at - 170)
-        sent = ("… " if a else "") + sent[a:a + 320].strip() + (" …" if a + 320 < len(sent) else "")
-    return re.sub(r"\s+", " ", sent)
+        if a:
+            sp = sent.find(" ", a, at)   # cut between words, never inside one
+            a = sp + 1 if sp >= 0 else a
+        b = a + 320
+        if b < len(sent):
+            sp = sent.rfind(" ", a, b)
+            b = sp if sp > at else b
+        body = sent[a:b].strip()
+        if a:
+            body = body.lstrip(" ,.;:)–—-")
+        sent = ("… " if a else "") + body + (" …" if b < len(sent) else "")
+    sent = re.sub(r"\s+", " ", sent)
+    return re.sub(r" ([,.;])(?= |$|[\"”’)])", r"\1", sent)
 
 
 def company_key(company: str) -> str:
@@ -279,6 +318,8 @@ def company_keys(company: str) -> list[str]:
     first = re.split(r"[\s.]+", key)[0]
     if len(first) >= 5 and first.lower() not in COMMON_FIRST:
         out.append(first)
+    if len(key) >= 4 and " " not in key.strip():   # 'Measur' is 'Measurlabs' on its own blog, 'Verda' is 'Verda AI'
+        out += [f"{key} {tail}" for tail in ("labs", "ai", "hq", "app", "tech", "health", "technologies")]
     return list(dict.fromkeys(out))
 
 
@@ -400,7 +441,7 @@ async def check_round(rd: dict) -> dict:
            "named": [], "amount": None, "stages": [], "headline": [], "pages": [], "published": {}, "dated": {},
            "page_stages": {}}
     for src, pg in zip(srcs, pages):
-        text = pg["text"]
+        text = tidy(pg["text"])
         if not text:
             out["pages"].append({"url": src["url"], "publisher": src.get("publisher"), "status": pg["status"]})
             continue

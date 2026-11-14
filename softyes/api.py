@@ -318,12 +318,20 @@ async def suggest(q: str = "", limit: int = 7):
         seen.add(shown)
         items.append(dict(e))
     nq, out = graph.norm(q), []
+
+    def typed(e: dict) -> bool:   # the name starts with what was typed: "sequoia", "first round", not "capital" or "ventures"
+        words = q.lower().split()
+        return e["key"].startswith(nq) or (graph.root(e["name"])[0] or "").startswith(nq) or \
+            (len(words) >= 2 and e["name"].lower().startswith(words[0])
+             and all(any(w.startswith(x) for w in e["name"].lower().split()) for x in words))
+
     for n, e in enumerate(items[:limit]):
-        # `sure`: the row is what was typed (its name starts with it, or it is a known other name), with a record in Cala.
-        # Enter takes the top row only then; a near miss or a namesake has to be chosen.
-        typed = e["key"].startswith(nq) or (graph.root(e["name"])[0] or "").startswith(nq) or \
-            all(any(w.startswith(x) for w in e["name"].lower().split()) for x in q.lower().split())
-        sure = n == 0 and e["rounds"] > 0 and ((bool(nick) and not e.get("did_you_mean")) or (typed and not e.get("did_you_mean")))
+        # `sure`: the row is what was typed (a known other name, the name itself, or the one well-known name that starts
+        # with it), with a record in Cala. Enter takes the top row only then; a near miss, a namesake, a word from the
+        # middle of a name ("capital") or a start two firms share ("north") has to be chosen.
+        exact = nq == e["key"]
+        rival = any(typed(o) and o["rounds"] >= e["rounds"] for o in items[1:limit])
+        sure = n == 0 and e["rounds"] > 0 and not e.get("did_you_mean") and (bool(nick) or exact or (typed(e) and not rival))
         out.append({**{k: v for k, v in e.items() if not k.startswith("_")}, "known_rounds": e.get("walked") or e["rounds"], "sure": sure})
     return {"items": out, "source": source}
 

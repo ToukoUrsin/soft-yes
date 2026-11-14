@@ -219,10 +219,10 @@ def _note_check(rd: dict, c: dict | None, findings: list[dict], claims: list[lis
     read = [p["url"] for p in (c or {}).get("pages", []) if p["status"] == "read"][:3]
     for i in rd["investors"]:
         ch = i.get("check")
-        if not ch:
+        if not ch or not co:   # a round Cala names no company for is no claim anyone could repeat
             continue
         claims.append([rd["id"], graph.norm(i["name"]), ch["status"]])
-        if ch["status"] == "lead" and co and ch.get("quote") and ch.get("url"):
+        if ch["status"] == "lead" and ch.get("quote") and ch.get("url"):
             # a claim only an older page backs is listed as that page has it: its date, and its stage or none
             findings.append({**base, **(ch.get("earlier") or {}), "kind": "confirmed", "cala": i["name"], "quote": ch["quote"],
                              "url": ch["url"], "publisher": ch.get("publisher")})
