@@ -92,12 +92,18 @@ a { color: inherit; }
   .chat { padding-top: 18px; }
   .brand span { display: none; }
   .me { max-width: 88%; }
+  .chips { flex-wrap: wrap; overflow: visible; }
+  .chip { flex: 0 1 auto; height: auto; min-height: 34px; padding: 6px 13px; white-space: normal; text-align: left; line-height: 1.3; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 body.bare .top, body.bare .dock, body.bare .hello { display: none; }
 body.bare .chat { padding: 12px 16px; }
 html:has(body.bare), body.bare { height: auto; display: block; }
 body.bare .scroll { overflow: visible; }
+/* inside the site's first page: only the card, on the site's own ground */
+body.embed .use, body.embed p.it, body.embed .close { display: none; }
+html:has(body.embed), body.embed { background: transparent; }
+body.embed .chat { padding: 0; max-width: none; gap: 14px; }
 </style>
 </head>
 <body>
@@ -152,7 +158,14 @@ body.bare .scroll { overflow: visible; }
   const dark = matchMedia('(prefers-color-scheme: dark)')
   const theme = () => Q.get('theme') || (dark.matches ? 'dark' : 'light')
   document.documentElement.dataset.theme = theme()
-  if (Q.get('bare')) document.body.classList.add('bare')
+  const EMBED = !!Q.get('embed')
+  if (Q.get('bare') || EMBED) document.body.classList.add('bare')
+  if (EMBED) {
+    document.body.classList.add('embed')
+    document.documentElement.style.colorScheme = theme()
+    // the page around it gives the card the height it asks for
+    new ResizeObserver(() => parent.postMessage({ softyes: 'height', height: Math.ceil(chat.getBoundingClientRect().height) }, location.origin)).observe(chat)
+  }
   $('url').textContent = location.origin + '/mcp'
 
   let rid = 1
@@ -176,7 +189,7 @@ body.bare .scroll { overflow: visible; }
     const full = card.mode === 'fullscreen'
     const maxh = +Q.get('maxh') || undefined
     return {
-      theme: theme(), displayMode: card.mode, availableDisplayModes: ['inline', 'fullscreen'], platform: innerWidth < 600 ? 'mobile' : 'web',
+      theme: theme(), displayMode: card.mode, availableDisplayModes: EMBED ? ['inline'] : ['inline', 'fullscreen'], platform: innerWidth < 600 ? 'mobile' : 'web',
       containerDimensions: full ? { width: card.frame.clientWidth, height: card.frame.clientHeight } : { width: card.frame.clientWidth, maxHeight: maxh },
       safeAreaInsets: { top: 0, right: 0, bottom: 0, left: 0 }, toolInfo: { tool: { name: card.tool } }, locale: navigator.language,
     }
@@ -194,6 +207,7 @@ body.bare .scroll { overflow: visible; }
     frame.title = 'Soft Yes'
     frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox')
     frame.setAttribute('allow', 'clipboard-write')
+    if (EMBED) frame.style.colorScheme = theme()   // the same scheme as the page around it, or the browser paints the frame's ground
     frame.srcdoc = html
     wrap.append(bar, frame)
     chat.append(wrap)
@@ -307,6 +321,7 @@ body.bare .scroll { overflow: visible; }
       it('In your own assistant this lands in your mail drafts, unsent. This chat has no mailbox, so it only marks the lead as asked.', true)
       return step('round_tracker', { run_id: state.run, tracker: state.tracker || undefined, updates: state.lead ? [{ investor: state.lead, status: 'asked', via: state.door || undefined }] : [] })
     }
+    if ((m = /show who (.+?) has sat in rounds with/i.exec(text))) return step('explore_network', { fund: m[1].trim() })
     if (state.run && /network|know|co-?invest|door|one hop/i.test(text)) {
       m = /(?:to|from|reach|introduce me to)\s+([A-Z][\w&.\- ]+?)\??$/.exec(text)
       return step('explore_network', m ? { run_id: state.run, target: m[1].trim() } : { run_id: state.run })

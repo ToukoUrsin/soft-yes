@@ -13,7 +13,7 @@ function NotFound() {
       <div className="state">
         <strong>There is nothing at this address.</strong>
         <span>The link may be mistyped. A walk starts from the investors who said yes.</span>
-        <Link className="btn" href="/">Start a walk</Link>
+        <Link className="btn" href="/find">Start a walk</Link>
       </div>
     </main>
   )
@@ -22,7 +22,7 @@ function NotFound() {
 export function App() {
   const [path] = useLocation()
   const check = useConfig()?.framing === 'investor_check'
-  const findHref = check ? '/find' : '/'
+  const findHref = '/find'
   const checkHref = check ? '/' : '/investor'
   const onAudit = path.startsWith('/audit')
   const onCheck = path.startsWith('/investor') || (check && path === '/')
@@ -43,7 +43,7 @@ export function App() {
             <span className="wordmark__name">Soft Yes</span>
           </Link>
           <nav className="topnav" aria-label="Main">
-            <Link href={findHref} aria-current={!onCheck && !onAudit ? 'page' : undefined}>Find a lead</Link>
+            <Link href={findHref} aria-current={path.startsWith('/find') || path.startsWith('/r/') ? 'page' : undefined}>Find a lead</Link>
             <Link href={checkHref} aria-current={onCheck ? 'page' : undefined}>Investor check</Link>
             <Link href="/audit" aria-current={onAudit ? 'page' : undefined}>Page check</Link>
           </nav>

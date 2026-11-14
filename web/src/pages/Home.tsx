@@ -6,6 +6,7 @@ import { recentRuns, useConfig, useSessionState, useTask } from '../lib/store'
 import { walkStore } from '../lib/walk'
 import { SingleField, TokenField, type Token } from '../components/Pickers'
 import { CopyButton, Icon, Segmented } from '../components/ui'
+import { Front } from './Front'
 
 interface Examples { examples: Example[]; real: Example[] }
 
@@ -479,5 +480,6 @@ export function Home({ mode }: { mode?: 'find' | 'check' }) {
   if (!mode && !config && !waited) return <main className="page home" aria-busy="true" />
   const check = config?.framing === 'investor_check'
   const show = mode ?? (check ? 'check' : 'find')
-  return show === 'check' ? <InvestorAsk config={config} findHref={check ? '/find' : '/'} /> : <SoftYesAsk config={config} />
+  if (!mode && !check) return <Front />
+  return show === 'check' ? <InvestorAsk config={config} findHref="/find" /> : <SoftYesAsk config={config} />
 }

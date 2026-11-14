@@ -297,7 +297,7 @@ export function AuditPage() {
         <div className="state">
           <strong>No page has been checked yet.</strong>
           <span>Each walk reads the pages Cala cites for its rounds. Run one and its claims show up here.</span>
-          <Link className="btn" href="/">Start a walk</Link>
+          <Link className="btn" href="/find">Start a walk</Link>
         </div>
       ) : (
         <>

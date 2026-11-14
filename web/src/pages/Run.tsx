@@ -396,7 +396,7 @@ export function Run() {
           <div className="state">
             <strong>This walk is not stored here.</strong>
             <span>The link may be from another server, or the walk was cleared. Start it again and you get a new link.</span>
-            <Link className="btn" href="/">Start a walk</Link>
+            <Link className="btn" href="/find">Start a walk</Link>
           </div>
         </main>
       )
@@ -489,7 +489,7 @@ export function Run() {
                 {inputs && (
                   <button type="button" className="btn btn--primary" onClick={() => walkStore.start(inputs)}>Try again</button>
                 )}
-                <Link className="btn" href="/">Change the investors</Link>
+                <Link className="btn" href="/find">Change the investors</Link>
               </>
             ) : done && result ? (
               <>
@@ -600,7 +600,7 @@ export function Run() {
                     what Cala covers, not a verdict on them.
                   </span>
                   <span>Add another investor who said yes, or try the fund’s full legal name.</span>
-                  <Link className="btn" href="/">Add another investor</Link>
+                  <Link className="btn" href="/find">Add another investor</Link>
                 </div>
               </section>
             )}

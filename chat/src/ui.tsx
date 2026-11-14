@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { openLink } from './bridge'
-import { cut, reduced } from './lib'
+import { reduced, spellings } from './lib'
 
 const PATHS: Record<string, string> = {
   // where a fact comes from
@@ -71,17 +71,29 @@ export function Link({ href, children, class: cls }: { href?: string | null; chi
   )
 }
 
-/** A sentence from a page, with the investor's name marked in it. */
-export function Quote({ text, names, struck }: { text: string; names: string[]; struck?: string[] }) {
-  const [a, hit, b] = cut(text, names)
-  const rest = struck?.length ? cut(b, struck) : null
-  return (
-    <blockquote class="q">
-      {a}
-      {hit && <mark>{hit}</mark>}
-      {rest && rest[1] ? <>{rest[0]}<s>{rest[1]}</s>{rest[2]}</> : b}
-    </blockquote>
-  )
+/** A sentence from a page: the lead's name marked, a name the page does not bear out struck, another name underlined. */
+export function Quote({ text, names, struck, also }: { text: string; names: string[]; struck?: string[]; also?: string[] }) {
+  const low = text.toLowerCase()
+  const find = (ns?: string[]): [number, number] | null => {
+    for (const n of ns || []) for (const sp of spellings(n)) {
+      const at = low.indexOf(sp.toLowerCase())
+      if (at >= 0) return [at, at + sp.length]
+    }
+    return null
+  }
+  const hits = ([[find(names), 'mark'], [find(struck), 's'], [find(also), 'u']] as [[number, number] | null, string][])
+    .filter((h): h is [[number, number], string] => !!h[0]).sort((a, b) => a[0][0] - b[0][0])
+  const out: ComponentChildren[] = []
+  let at = 0
+  for (const [[from, to], tag] of hits) {
+    if (from < at) continue
+    out.push(text.slice(at, from))
+    const word = text.slice(from, to)
+    out.push(tag === 'mark' ? <mark>{word}</mark> : tag === 's' ? <s>{word}</s> : <u>{word}</u>)
+    at = to
+  }
+  out.push(text.slice(at))
+  return <blockquote class="q">{out}</blockquote>
 }
 
 export function Btn({ children, onClick, kind = 'quiet', icon, busy, disabled, title }: {

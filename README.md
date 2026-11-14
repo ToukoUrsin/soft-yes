@@ -15,7 +15,7 @@ Soft Yes is a connector for Claude. You ask in the chat and the answer is a card
 1. asks Cala's graph for companies like yours,
 2. reads their rounds and who invested, and the rounds joined by investors you already know,
 3. reads Cala's own record of each investor it lists,
-4. ranks them by what that record says: backs your field, leads rounds, at your stage, active now, your round size, near you, and a way in through someone you know.
+4. ranks them by what that record says: backs your field, leads rounds, at your stage, active now, your round size, near you, and a way in through someone you know. No shared round? It reads further in the graph, up to three introductions, each one a round both funds sat in.
 
 **Who could lead?** Every founder hears it: "We like it. We're in once you have a lead." Name the investors who told you that. Soft Yes then
 
@@ -32,7 +32,7 @@ Try it in Claude:
 
 > Tesi and Innovestor said they're in once we have a lead. Use Soft Yes to find who could lead our Series A.
 
-No Claude at hand: the same cards are at https://soft-yes.fly.dev/chat, and the lead search has its own site at https://soft-yes.fly.dev.
+No Claude at hand: https://soft-yes.fly.dev draws the same two cards.
 
 ![The lead search in the Claude chat: the investors who said yes, the rounds they joined, who led them](docs/walk.png)
 

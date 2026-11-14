@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { say, tell } from './bridge'
-import { type FindCompany, type FindData, type FindInvestor, type FindProgress, askWords, listAnd, month, num, ok, plural, reduced } from './lib'
+import { type ChainLink, type FindCompany, type FindData, type FindInvestor, type FindProgress, askWords, listAnd, month, num, ok, plural, reduced } from './lib'
 import { Btn, Count, Head, Icon, Ledger, Link, Quote, Src, useWidth } from './ui'
 import { Fixes, drawn } from './walk'
 
@@ -14,7 +14,7 @@ const NAMED = '~cala'   // the node for investors Cala's own answer names, with 
 const VIA = '~via'      // the node for the investors the founder knows: the rounds they sat in lead to the way in
 
 type Left = FindCompany | typeof NAMED | typeof VIA
-interface LinkRow { c: number; i: number; ok: boolean; led: boolean }
+interface LinkRow { c: number; i: number; ok: boolean; led: boolean; far?: boolean }
 interface Plan { cos: Left[]; invs: FindInvestor[]; links: LinkRow[]; cols: string[]; moreCos: number; moreInvs: number }
 
 function plan(d: FindData, maxC: number, maxI: number): Plan {
@@ -34,7 +34,7 @@ function plan(d: FindData, maxC: number, maxI: number): Plan {
   of.forEach((m) => m.forEach((_, name) => count.set(name, (count.get(name) ?? 0) + 1)))
   const order = [...d.companies].sort((a, b) => (count.get(b.name) ?? 0) - (count.get(a.name) ?? 0) || b.rounds.length - a.rounds.length)
   const loose = invs.some((x, i) => of[i].size === 0 && x.named_by_cala && !x.path.length)
-  const via = invs.some((x) => x.path.length > 0)
+  const via = invs.some((x) => x.path.length > 0 || (x.chain?.links.length ?? 0) > 1)
   const room = maxC - (loose ? 1 : 0) - (via ? 1 : 0)
   const cos: Left[] = order.slice(0, room)
   if (loose) cos.push(NAMED)
@@ -45,6 +45,7 @@ function plan(d: FindData, maxC: number, maxI: number): Plan {
     m.forEach((v, name) => { const c = at.get(name); if (c != null) links.push({ c, i, ...v }) })
     const way = invs[i].path[0]
     if (way) links.push({ c: at.get(VIA)!, i, ok: !!way.led && ok(way.status), led: !!way.led })
+    else if ((invs[i].chain?.links.length ?? 0) > 1) links.push({ c: at.get(VIA)!, i, ok: false, led: false, far: true })
     else if (m.size === 0 && invs[i].named_by_cala && at.has(NAMED)) links.push({ c: at.get(NAMED)!, i, ok: false, led: false })
   })
   const cols = ORDER.filter((id) => invs.some((x) => x.signals.some((s) => s.id === id)))
@@ -65,7 +66,7 @@ function Dots({ x, cols, lit }: { x: FindInvestor; cols: string[]; lit: boolean 
     <span class={`sig${lit ? ' is-lit' : ''}`} title={on.length ? on.join(' · ') : 'No signal in its record'} aria-label={`${on.length} of ${x.signals.length} signals`}>
       {cols.map((id, n) => {
         const s = by.get(id)
-        return <i key={id} class={s ? (s.on ? 'is-on' : 'is-off') : 'is-none'} style={{ '--n': n }} />
+        return <i key={id} class={s ? (s.on ? 'is-on' : s.far ? 'is-far' : 'is-off') : 'is-none'} style={{ '--n': n }} />
       })}
     </span>
   )
@@ -103,7 +104,7 @@ function Graph({ p, phase, read, hot, setHot, onPick, width, d }: {
           const on = !lit || (lit.kind === 'c' ? l.c === lit.n : l.i === lit.n)
           const seen = phase >= PHASE.done || (phase === PHASE.read && l.i <= read)
           return <path key={n} d={curve(col.c[1] + 5, yC(l.c), col.i[0] - 5, yI(l.i))} pathLength={1}
-            class={`lk lk--f${seen && l.ok ? ' is-ok' : ''}${p.cos[l.c] === NAMED ? ' lk--named' : p.cos[l.c] === VIA ? ' lk--via' : ''}${on ? '' : ' is-dim'}`} style={{ '--d': `${l.i * 60}ms` }} />
+            class={`lk lk--f${seen && l.ok ? ' is-ok' : ''}${p.cos[l.c] === NAMED ? ' lk--named' : p.cos[l.c] === VIA ? ' lk--via' : ''}${l.far ? ' lk--far' : ''}${on ? '' : ' is-dim'}`} style={{ '--d': `${l.i * 60}ms` }} />
         })}
       </svg>
       <span class="g__h" style={{ left: 0, width: `${col.c[1]}px`, textAlign: 'right' }}>{d.ask.like.length && !d.ask.sector ? 'Companies you named' : wide ? 'Companies like yours' : 'Like yours'}</span>
@@ -113,7 +114,7 @@ function Graph({ p, phase, read, hot, setHot, onPick, width, d }: {
       {p.cos.map((c, i) => {
         const whose = d.ask.via_company ? `${d.ask.via_company}’s investors` : 'Your investors'
         const name = c === NAMED ? 'Cala’s own answer' : c === VIA ? whose : c.name
-        const sub = c === NAMED ? 'investors it names' : c === VIA ? `${plural(d.counts.way_rounds ?? 0, 'round')} they sat in`
+        const sub = c === NAMED ? 'investors it names' : c === VIA ? `${plural(d.counts.mine_rounds ?? d.counts.way_rounds ?? 0, 'round')} they sat in`
           : [c.where, c.rounds[0] ? [c.rounds[0].stage_name, c.rounds[0].money].filter(Boolean).join(' ') : plural(c.investors_listed, 'investor')].filter(Boolean).join(' · ')
         const title = c === NAMED ? 'Investors Cala’s answer names for this field' : c === VIA ? `Rounds ${listAnd(d.ask.mine.slice(0, 4))} sat in, and who led or joined them` : c.description || c.name
         return (
@@ -145,6 +146,20 @@ function Graph({ p, phase, read, hot, setHot, onPick, width, d }: {
       {p.moreCos > 0 && phase >= PHASE.cos && <span class="g__more" style={{ left: 0, width: `${col.c[1]}px`, textAlign: 'right' }}>+{p.moreCos} more</span>}
       {p.moreInvs > 0 && phase >= PHASE.invs && <span class="g__more" style={{ left: `${col.i[0] + 15}px` }}>+{p.moreInvs} more</span>}
     </div>
+  )
+}
+
+/** What the dots stand for, in the order they are drawn. */
+function Legend({ d, cols }: { d: FindData; cols: string[] }) {
+  const label = new Map<string, string>()
+  for (const x of d.investors) for (const s of x.signals) if (!label.has(s.id)) label.set(s.id, s.label)
+  const names = cols.map((id) => label.get(id)).filter(Boolean) as string[]
+  if (names.length < 2) return null
+  return (
+    <p class="legend">
+      <span class="legend__k">The dots, left to right</span>
+      {names.map((n, i) => <span key={n} class="legend__i"><i>{i + 1}</i>{n}</span>)}
+    </p>
   )
 }
 
@@ -213,6 +228,32 @@ function Reading({ d, p, phase, read, typed }: { d: FindData; p: Plan; phase: nu
   )
 }
 
+/** The way in, link by link: who the founder knows, the fund that one sat with, and so on to this investor. Each link is a round in Cala. */
+function Chain({ x }: { x: FindInvestor }) {
+  const ch = x.chain!
+  const n = ch.links.length
+  const what = (l: ChainLink) => [l.company ? `${ty(l.company)}${l.stage_name ? ` ${/^series/i.test(l.stage_name) ? l.stage_name : l.stage_name.toLowerCase()}` : ''}` : '', l.company && l.date ? l.date.slice(0, 4) : ''].filter(Boolean).join(', ')
+  return (
+    <div class="chain">
+      <p class="chain__k"><Src kind="cala" label="The way in" /><span>{n === 1 ? 'One introduction' : `${n} introductions`}. Each link is a round both sat in.</span></p>
+      <ol class="chain__t">
+        <li class="chain__n chain__n--you"><i />{ch.start ? ty(ch.start) : 'You'}</li>
+        <li class="chain__l"><span>{ch.start ? 'its investor' : 'your investor'}</span></li>
+        {ch.links.map((l, i) => (
+          <>
+            <li key={`a${i}`} class="chain__n"><i />{ty(l.a)}</li>
+            <li key={`l${i}`} class="chain__l">
+              <span>{l.led ? `${ty(l.b)} led a round with ${ty(l.a)} in it` : `${plural(l.rounds, 'round')} together`}</span>
+              {what(l) && <><span class="sep">·</span>{!l.led && l.rounds > 1 && <span>one is</span>}{l.url ? <Link href={l.url}>{what(l)}</Link> : <span>{what(l)}</span>}</>}
+            </li>
+          </>
+        ))}
+        <li class="chain__n chain__n--it"><i />{ty(x.name)}</li>
+      </ol>
+    </div>
+  )
+}
+
 function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boolean; onToggle: () => void; short: boolean; onNet: (x: FindInvestor) => void }) {
   const cites = [
     ...x.deals.map((dl) => ({ what: [dl.company, dl.stage_name, month(dl.date), dl.money].filter(Boolean).join(', ') + (dl.led ? ', led' : ''), src: dl.url ? { url: dl.url, publisher: dl.publisher } : dl.sources[0] })),
@@ -230,7 +271,7 @@ function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boole
             <span>{ty(x.line)}</span>
           </span>
           <span class="sgs">
-            {x.signals.map((s) => <span key={s.id} class={`sg${s.on ? ' is-on' : ''}`}><i />{s.label}{s.id === 'field' && (s.n ?? 0) > 1 ? ` ×${s.n}` : ''}</span>)}
+            {x.signals.map((s) => <span key={s.id} class={`sg${s.on ? ' is-on' : s.far ? ' is-far' : ''}`}><i />{s.far ? `${s.far} introductions away` : s.label}{s.id === 'field' && (s.n ?? 0) > 1 ? ` ×${s.n}` : ''}</span>)}
           </span>
         </span>
         <Icon name="down" size={14} class="lead__chev" />
@@ -248,12 +289,13 @@ function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boole
           )}
           <ul class="why why--sig">
             {x.signals.map((s) => (
-              <li key={s.id} class={s.on ? 'is-on' : 'is-off'}>
-                <Icon name={s.on ? 'check' : 'x'} size={12} />
+              <li key={s.id} class={s.on ? 'is-on' : s.far ? 'is-far' : 'is-off'}>
+                <Icon name={s.on ? 'check' : s.far ? 'net' : 'x'} size={12} />
                 <span><b>{s.label}.</b> {ty(s.text)}.</span>
               </li>
             ))}
           </ul>
+          {x.chain && x.chain.links.length > 0 && <Chain x={x} />}
           {cites.length > 0 && (
             <p class="cites">
               <Src kind="cala" label="Cala’s sources" />
@@ -304,7 +346,7 @@ function Companies({ d }: { d: FindData }) {
 export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
   data: FindData; cardId: string; roomy: boolean; fit: number; canExpand: boolean; onExpand: () => void
 }) {
-  const once = `${cardId && d.run_id ? `${cardId}:${d.run_id}` : ''}`
+  const once = d.run_id ? `${cardId}:${d.run_id}` : ''
   const tight = fit >= 1
   const tiny = fit >= 2
   const [ref, width] = useWidth<HTMLDivElement>()
@@ -318,6 +360,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
   const [cos, setCos] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [run, setRun] = useState(0)
+  const played = useRef(-1)   // the run that has drawn itself to the end: making the card larger does not start it over
   const timers = useRef<number[]>([])
   const wide = width >= 560
   const p = useMemo(() => plan(d, roomy ? 12 : tiny ? 4 : tight ? 5 : 7, roomy ? 14 : tiny ? 4 : tight ? 5 : 8), [d, roomy, tight, tiny])
@@ -328,7 +371,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
     timers.current.forEach(clearTimeout)
     timers.current = []
     if (still || !width) return
-    if (run === 0 && drawn(once)) { setPhase(PHASE.done); setTyped(query); return }
+    if ((run === 0 && drawn(once)) || played.current === run) { setPhase(PHASE.done); setTyped(query); return }
     const at = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms))
     setPhase(PHASE.rest)
     setRead(-1)
@@ -353,7 +396,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
     at(t + 200, () => setPhase(PHASE.done))
     return () => timers.current.forEach(clearTimeout)
   }, [run, width > 0, p, still])
-  useEffect(() => { if (phase >= PHASE.done) drawn(once, true) }, [phase, once])
+  useEffect(() => { if (phase >= PHASE.done) { drawn(once, true); played.current = run } }, [phase, once])
 
   const skip = () => {
     if (phase >= PHASE.done) return
@@ -381,7 +424,9 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
       <Head
         title={`Investors for ${words || 'your round'}`}
         sub={d.investors.length
-          ? <><b>{num(d.investors_total)}</b> investors around <b>{num(d.counts.companies)}</b> {d.counts.companies === 1 ? 'company' : 'companies'} like yours{d.counts.way_rounds ? <> and <b>{num(d.counts.way_rounds)}</b> rounds {d.ask.via_company ? `${d.ask.via_company}’s` : 'your'} investors sat in</> : null}, ranked by what Cala’s graph says of each.{d.counts.way_rounds ? '' : ` ${way}`}</>
+          ? <><b>{num(d.investors_total)}</b> investors around <b>{num(d.counts.companies)}</b> {d.counts.companies === 1 ? 'company' : 'companies'} like yours{d.counts.way_rounds ? <> and <b>{num(d.counts.mine_rounds ?? d.counts.way_rounds)}</b> rounds {d.ask.via_company ? `${d.ask.via_company}’s` : 'your'} investors sat in</> : null}{(d.counts.ways ?? 0) + (d.counts.ways_far ?? 0) > 0
+            ? <>. <b>{num((d.counts.ways ?? 0) + (d.counts.ways_far ?? 0))}</b> have a way in{d.counts.ways_far ? <>, <b>{num(d.counts.ways_far)}</b> of them two or three introductions away</> : null}.</>
+            : <>, ranked by what Cala’s graph says of each.{d.counts.way_rounds ? '' : ` ${way}`}</>}</>
           : d.headline}
         right={<>
           {phase >= PHASE.done && !still && <button type="button" class="tool" onClick={() => setRun(run + 1)} title="Play the search again"><Icon name="replay" size={14} />Replay</button>}
@@ -399,7 +444,9 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
       {d.investors.length > 0 && (
         <div class="stage" onClick={skip}>
           {width > 0 && <Graph d={d} p={p} phase={phase} read={read} hot={hot} setHot={setHot} onPick={pick} width={width - 2} />}
+          {phase >= PHASE.read && !tiny && <Legend d={d} cols={p.cols} />}
           <Reading d={d} p={p} phase={phase} read={read} typed={typed} />
+          {phase >= PHASE.done && <Fixes fixes={d.fixes} wide={wide} bare={tiny} />}
         </div>
       )}
 
@@ -412,7 +459,6 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
       )}
       {note && <p class="banner">{note}</p>}
       {cos && <Companies d={d} />}
-      {(roomy || all) && <Fixes fixes={d.fixes} />}
 
       <footer class="foot">
         <div class="foot__l">

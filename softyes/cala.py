@@ -23,15 +23,15 @@ BASE = "https://api.cala.ai/v1"
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("SOFTYES_DB") or ROOT / "data" / "cache.db")  # the public host keeps it on a volume
 PER_MINUTE = int(os.environ.get("CALA_PER_MINUTE", "80"))
-CREDIT_CAP = int(os.environ.get("CALA_CREDIT_CAP", "3060"))  # fresh calls allowed since PLAN_START
+CREDIT_CAP = int(os.environ.get("CALA_CREDIT_CAP", "3550"))  # fresh calls allowed since PLAN_START (the console showed 1,079 credits left at 2,559 calls)
 PLAN_START = float(os.environ.get("CALA_PLAN_START", "1794611220"))  # 2026-11-13T23:07Z, first credit pack
 
 
 # Who is asking: (visitor id, address), set per request on the public host. A visitor may cause this many fresh Cala
 # calls a day; after that it is served from what has been read already. Nobody can drain the credits for the next one.
 VISITOR: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar("visitor", default=None)
-VISITOR_CAP = int(os.environ.get("CALA_VISITOR_CAP", "150"))
-ADDRESS_CAP = int(os.environ.get("CALA_ADDRESS_CAP", "600"))   # many people can share one address (a venue's network)
+VISITOR_CAP = int(os.environ.get("CALA_VISITOR_CAP", "220"))
+ADDRESS_CAP = int(os.environ.get("CALA_ADDRESS_CAP", "1500"))   # many people can share one address (a venue's network)
 _spent: dict[str, collections.deque] = {}
 
 

@@ -313,38 +313,50 @@ function Inbox({ softs }: { softs: Soft[] }) {
   )
 }
 
-export function Fixes({ fixes }: { fixes: Fix[] }) {
+/** Where the page Cala cites names another lead: Cala's claim struck, the lead the page gives, and the page's sentence. */
+export function Fixes({ fixes, wide, bare }: { fixes: Fix[]; wide?: boolean; bare?: boolean }) {
+  const [all, setAll] = useState(false)
   if (!fixes.length) return null
+  const rows = all ? fixes : fixes.slice(0, 2)
+  const what = (f: Fix) => {
+    const st = f.stage_name || 'round'
+    return `${f.company}’s ${/^(round|seed|pre-seed)$/i.test(st) ? st.toLowerCase() : st}`
+  }
   return (
-    <section class="fixes">
-      <h2>Where the page and Cala disagree</h2>
+    <section class={`fixes${wide && rows.length > 1 ? ' fixes--2' : ''}`}>
+      <h2><Icon name="x" size={12} class="bad" />The page names another lead <span class="num">{fixes.length}</span></h2>
       <ul>
-        {fixes.map((f, i) => (
-          <li key={i}>
-            <p><b>{[f.company, f.stage_name, month(f.date)].filter(Boolean).join(', ')}</b>. Cala: <s>{f.cala}</s> led. The page: {listAnd(f.page)}.</p>
-            {f.quote && <Quote text={f.quote} names={f.page} struck={f.cala ? [f.cala] : undefined} />}
+        {rows.map((f, i) => (
+          <li key={`${f.round}${i}`}>
+            <p class="fixes__row"><span class="fixes__k">Cala</span><s>{f.cala} led {what(f)}</s>{f.date && <span class="fixes__d">{month(f.date)}</span>}</p>
+            <p class="fixes__row"><span class="fixes__k">Page</span><b>{listAnd(f.page)} led</b></p>
+            {f.quote && !bare && <Quote text={f.quote} names={f.page} also={f.cala ? [f.cala] : undefined} />}
             <Link href={f.url}>{f.publisher || 'source'}</Link>
           </li>
         ))}
       </ul>
+      {fixes.length > 2 && <button type="button" class="more" onClick={(e) => { e.stopPropagation(); setAll(!all) }}>{all ? 'Show two' : `All ${fixes.length}`}</button>}
     </section>
   )
 }
 
 /** A chat takes a card off the page when it scrolls away and puts it back later. The walk draws itself once per call;
  *  put back, it is simply there. */
+const DRAWN = new Set<string>()   // while this card lives: coming back from the network view does not draw the walk again
 export function drawn(id: string, set?: boolean): boolean {
   if (!id) return false
+  if (set) DRAWN.add(id)
+  if (id.startsWith(':')) return DRAWN.has(id)   // no call id from the chat: remembered only while the card lives
   try {
     if (set) sessionStorage.setItem(`sy:drawn:${id}`, '1')
-    return sessionStorage.getItem(`sy:drawn:${id}`) === '1'
-  } catch { return false }
+    return DRAWN.has(id) || sessionStorage.getItem(`sy:drawn:${id}`) === '1'
+  } catch { return DRAWN.has(id) }
 }
 
 export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwork }: {
   data: WalkData; cardId: string; roomy: boolean; fit: number; canExpand: boolean; onExpand: () => void; onNetwork: (focus?: string) => void
 }) {
-  const once = `${cardId && d.run_id ? `${cardId}:${d.run_id}` : ''}`
+  const once = d.run_id ? `${cardId}:${d.run_id}` : ''
   const tight = fit >= 1
   const tiny = fit >= 2
   const [ref, width] = useWidth<HTMLDivElement>()
@@ -358,6 +370,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
   const [note, setNote] = useState<string | null>(null)
   const [asks, setAsks] = useState<Record<string, DraftData>>({})
   const [run, setRun] = useState(0)
+  const played = useRef(-1)   // the run that has drawn itself to the end: making the card larger does not start it over
   const timers = useRef<number[]>([])
   const wide = width >= 560
   const p = useMemo(() => plan(d, roomy ? 16 : tiny ? 5 : wide ? 7 : 12, roomy ? 14 : tiny ? 4 : tight ? 5 : 7), [d, roomy, wide, tight, tiny])
@@ -367,7 +380,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
     timers.current.forEach(clearTimeout)
     timers.current = []
     if (still || !width) return
-    if (run === 0 && drawn(once)) { setPhase(PHASE.done); return }
+    if ((run === 0 && drawn(once)) || played.current === run) { setPhase(PHASE.done); return }
     const at = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms))
     setPhase(PHASE.rest)
     setChecked(-1)
@@ -388,7 +401,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
     at(t + 200, () => setPhase(PHASE.done))
     return () => timers.current.forEach(clearTimeout)
   }, [run, width > 0, p, still])
-  useEffect(() => { if (phase >= PHASE.done) drawn(once, true) }, [phase, once])
+  useEffect(() => { if (phase >= PHASE.done) { drawn(once, true); played.current = run } }, [phase, once])
 
   const skip = () => {
     if (phase >= PHASE.done) return
@@ -452,6 +465,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
       <div class="stage" onClick={skip}>
         {width > 0 && <Graph d={d} p={p} phase={phase} checked={checked} hot={hot} setHot={setHot} onLead={pickLead} width={width - 2} roomy={roomy} />}
         <Reading p={p} phase={phase} checked={checked} d={d} />
+        {phase >= PHASE.done && <Fixes fixes={d.fixes} wide={wide} bare={tiny} />}
       </div>
 
       {d.partial && <p class="banner">Cala’s graph is thin for one of these investors, so reports are still being read. The list fills in within a minute.</p>}
@@ -478,8 +492,6 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
           </span>
         </p>
       )}
-
-      {(roomy || all) && <Fixes fixes={d.fixes} />}
 
       <footer class="foot">
         <div class="foot__l">

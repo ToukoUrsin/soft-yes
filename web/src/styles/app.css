@@ -4337,3 +4337,191 @@ button.lead-says__quote {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* ============================================================ the first page: the product as it runs in Claude */
+
+.front {
+  padding-top: 48px;
+}
+
+.front__add--below {
+  display: none;
+  max-width: 860px;
+  margin-top: 28px;
+}
+
+.front__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: 56px;
+  align-items: end;
+}
+
+.front h1 {
+  max-width: 17ch;
+  font-size: clamp(2rem, 1.3rem + 2.2vw, 2.75rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+}
+
+.front__lede {
+  margin-top: 18px;
+  max-width: 58ch;
+  font-size: var(--fs-m);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+.front__add {
+  display: grid;
+  gap: 10px;
+  font-size: var(--fs-s);
+  color: var(--text-3);
+}
+
+.front__add h2 {
+  font-size: var(--fs);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.front__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 36px;
+}
+
+.front__tab {
+  display: grid;
+  gap: 2px;
+  min-width: 250px;
+  padding: 11px 16px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast);
+}
+
+.front__tab b {
+  font-size: var(--fs-m);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.front__tab span {
+  font-size: var(--fs-s);
+  color: var(--text-3);
+}
+
+.front__tab:hover {
+  background: var(--bg-1);
+}
+
+.front__tab[aria-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.front__tab[aria-selected='true'] b {
+  color: var(--accent-ink);
+}
+
+.front__tab[aria-selected='true'] span {
+  color: oklch(0.4 0 0);
+}
+
+.front__say {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 860px;
+  margin-top: 18px;
+  padding: 12px 12px 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--bg-1);
+}
+
+.front__say p {
+  flex: 1 1 auto;
+  font-size: var(--fs);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.front__say p span {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.front__say .btn {
+  flex: none;
+}
+
+.front__card {
+  display: block;
+  width: 100%;
+  max-width: 860px;
+  margin-top: 22px;
+  border: 0;
+  background: transparent;
+  color-scheme: dark;
+}
+
+.front__more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin-top: 32px;
+  padding-top: 18px;
+  max-width: 860px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-s);
+  color: var(--text-3);
+}
+
+@media (max-width: 860px) {
+  .front {
+    padding-top: 36px;
+  }
+
+  .front__top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .front__add--top {
+    display: none;
+  }
+
+  .front__add--below {
+    display: grid;
+  }
+
+  .front__tabs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 26px;
+  }
+
+  .front__tab {
+    min-width: 0;
+    padding: 10px 12px 11px;
+  }
+
+  .front__tab b {
+    font-size: var(--fs);
+    line-height: 1.25;
+  }
+
+  .front__tab span {
+    font-size: var(--fs-xs);
+  }
+}

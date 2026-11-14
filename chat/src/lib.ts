@@ -135,7 +135,9 @@ export interface ClaimData {
 }
 
 export interface Cite { publisher?: string | null; url?: string | null; date?: string | null }
-export interface Signal { id: string; label: string; on: boolean; text: string; n?: number; via?: string[] }
+export interface Signal { id: string; label: string; on: boolean; text: string; n?: number; via?: string[]; far?: number }
+/** One link of a way in: two investors and the rounds Cala holds them both in. */
+export interface ChainLink { a: string; b: string; rounds: number; company?: string | null; stage_name?: string | null; date?: string | null; url?: string | null; led?: boolean }
 export interface FindDeal { company?: string; stage_name?: string; date?: string | null; led: boolean; status?: string | null; quote?: string | null; url?: string | null; publisher?: string | null; led_by?: string[] | null; sources: Cite[]; money?: string | null }
 export interface FindInvestor {
   key: string
@@ -157,6 +159,7 @@ export interface FindInvestor {
   own?: { rounds: number; led: number; at_stage: number; led_at_stage: number; capped: boolean; portfolio: number; recent: number } | null
   ways?: (FindDeal & { with: string[] })[]
   path: { via: string; rounds: number; company?: string | null; stage_name?: string | null; date?: string | null; led?: boolean; status?: string | null }[]
+  chain?: { start?: string | null; links: ChainLink[] } | null
 }
 export interface FindCompany {
   id: string
@@ -198,7 +201,7 @@ export interface FindData {
   companies: FindCompany[]
   investors: FindInvestor[]
   investors_total: number
-  counts: { companies: number; named_by_cala: number; rounds: number; rounds_read: number; investors: number; leads: number; own_records: number; ways?: number; way_rounds?: number }
+  counts: { companies: number; named_by_cala: number; rounds: number; rounds_read: number; investors: number; leads: number; own_records: number; ways?: number; way_rounds?: number; ways_far?: number; mine_rounds?: number; deep_rounds?: number }
   check: { rounds: number; pages: number; confirmed: number; corrected: number; unstated: number; unread: number }
   fixes: Fix[]
   ledger: { cala_calls?: number; fresh?: number; cached?: number; facts?: number; llm: number }

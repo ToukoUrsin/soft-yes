@@ -191,7 +191,8 @@ TOOLS = [
                     "in Cala is read. Returns investors ranked by signals counted from the graph: backed companies like "
                     "the founder's, leads rounds, invests at this stage, active in the last 12 months, round size, where "
                     "it sits, and a way in (a round it led or sat in with an investor the founder already knows, or with "
-                    "an investor in a company the founder knows: \"who could X's investors introduce us to\"). Draws the "
+                    "an investor in a company the founder knows: \"who could X's investors introduce us to\"; when there is "
+                    "no such round the graph is read further, up to three introductions, each link a round both sat in). Draws the "
                     "search and the list in the chat. Give sector, or like, or both. One call answers both who fits and "
                     "who can introduce them.",
      "inputSchema": {"type": "object", "properties": {
@@ -444,7 +445,7 @@ class Server:
         background: (None, how far it has got) comes back, and the card asks find_progress for the rest."""
         rid = scout.run_id(inputs)
         stored = extras.blob_get("scout:" + rid, SEARCH_STORED_S)
-        if stored:
+        if stored and stored.get("v") == scout.VERSION:
             return stored, {}
         for old in [k for k, v in FINDS.items() if time.time() - v["started"] > 1800]:
             FINDS.pop(old, None)
