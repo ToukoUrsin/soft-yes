@@ -390,7 +390,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
   const [read, setRead] = useState(-1)
   const [typed, setTyped] = useState('')
   const [hot, setHot] = useState<string | null>(null)
-  const [open, setOpen] = useState<string | null>(tight ? null : d.investors[0]?.key ?? null)
+  const [open, setOpen] = useState<string[]>(tight || !d.investors[0] ? [] : [d.investors[0].key])   // rows open one by one: closing another row above would move the one you clicked
   const [all, setAll] = useState(false)
   const [cos, setCos] = useState(false)
   const [rest, setRest] = useState(false)
@@ -401,7 +401,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
   const wide = width >= 560
   const p = useMemo(() => plan(d, roomy ? 12 : tiny ? 4 : tight ? 5 : 7, roomy ? 14 : tiny ? 4 : tight ? 5 : 8), [d, roomy, tight, tiny])
   const query = shortQuery(d.queries[0])
-  useEffect(() => { if (tight) setOpen(null) }, [tight])
+  useEffect(() => { if (tight) setOpen([]) }, [tight])
 
   useEffect(() => {
     timers.current.forEach(clearTimeout)
@@ -444,7 +444,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
     const x = d.investors.find((v) => v.key === key)
     if (!x) return
     if (!all && d.investors.indexOf(x) >= (tight ? 2 : 4)) setAll(true)
-    setOpen(key)
+    setOpen([key])
     tell(`The founder is looking at ${x.name} (rank ${x.rank}) in the Soft Yes investor search ${d.run_id}.`)
   }
   const net = async (x: FindInvestor) => {
@@ -495,7 +495,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
             {shown.flatMap((x, i) => [
               x.in_field === false && i > 0 && shown[i - 1].in_field !== false
                 ? <li key="tier" class="tier">Below: only shared a round with {d.ask.via_company ? `${d.ask.via_company}’s` : 'your'} investors. Cala shows none in a company like yours.</li> : null,
-              <Row key={x.key} x={x} short={!wide} open={open === x.key} onToggle={() => setOpen(open === x.key ? null : x.key)} onNet={net} />,
+              <Row key={x.key} x={x} short={!wide} open={open.includes(x.key)} onToggle={() => setOpen(open.includes(x.key) ? open.filter((k) => k !== x.key) : [...open, x.key])} onNet={net} />,
             ])}
           </ol>
           {d.investors.some((x) => x.sum) && <p class="facts__note order">{words ? `Companies like yours are the ones Cala names for ${words}${d.ask.like.length ? ', and the ones you named' : ''}. On top: investors Cala has in one of them, or lists for your field.` : 'On top: investors Cala has in a company like yours.'} Highest score first. The score adds up their rounds and their own record in Cala. Open one to see the sum.</p>}

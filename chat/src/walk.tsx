@@ -364,7 +364,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
   const [phase, setPhase] = useState<number>(still || drawn(once) ? PHASE.done : PHASE.rest)
   const [checked, setChecked] = useState(-1)
   const [hot, setHot] = useState<string | null>(null)
-  const [open, setOpen] = useState<string | null>(tight ? null : d.leads[0]?.key ?? null)
+  const [open, setOpen] = useState<string[]>(tight || !d.leads[0] ? [] : [d.leads[0].key])   // rows open one by one: closing another row above would move the one you clicked
   const [all, setAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -374,7 +374,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
   const timers = useRef<number[]>([])
   const wide = width >= 560
   const p = useMemo(() => plan(d, roomy ? 16 : tiny ? 5 : wide ? 7 : 12, roomy ? 14 : tiny ? 4 : tight ? 5 : 7), [d, roomy, wide, tight, tiny])
-  useEffect(() => { if (tight) setOpen(null) }, [tight])
+  useEffect(() => { if (tight) setOpen([]) }, [tight])
 
   useEffect(() => {
     timers.current.forEach(clearTimeout)
@@ -431,7 +431,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
     const l = d.leads.find((x) => x.key === key)
     if (!l) return
     if (!all && d.leads.indexOf(l) >= 3) setAll(true)
-    setOpen(key)
+    setOpen([key])
     tell(`The founder is looking at ${l.name} (rank ${l.rank}) in the Soft Yes walk ${d.run_id}.`)
   }
 
@@ -475,7 +475,7 @@ export function Walk({ data: d, cardId, roomy, fit, canExpand, onExpand, onNetwo
       ) : phase < PHASE.done ? null : (
         <ol class="leads is-in">
           {shown.map((l) => (
-            <LeadCard key={l.key} l={l} short={!wide} full={roomy} open={open === l.key} onToggle={() => setOpen(open === l.key ? null : l.key)}
+            <LeadCard key={l.key} l={l} short={!wide} full={roomy} open={open.includes(l.key)} onToggle={() => setOpen(open.includes(l.key) ? open.filter((k) => k !== l.key) : [...open, l.key])}
               onDraft={draft} onNet={(x) => onNetwork(x.key)} busy={busy === l.key}
               ask={asks[l.key]} onCloseAsk={() => setAsks(({ [l.key]: _, ...rest }) => rest)} />
           ))}
