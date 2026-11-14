@@ -111,7 +111,17 @@ async def config():
 
 @app.get("/api/examples")
 async def examples():
-    return {"examples": EXAMPLES}
+    """The examples, each investor with every Cala entity the autocomplete would give it."""
+    out = []
+    for ex in EXAMPLES:
+        softs = []
+        for s_ in ex["soft_yeses"]:
+            fam = next((f for f in _families(_local_hits(s_["name"], 20), 3, s_["name"])
+                        if f["key"] == graph.norm(s_["name"])), None)
+            ids = list(dict.fromkeys(s_["ids"] + (fam["ids"] if fam else [])))[:6]
+            softs.append({**s_, "ids": ids})
+        out.append({**ex, "soft_yeses": softs})
+    return {"examples": out}
 
 
 def _local_hits(q: str, limit: int) -> list[dict]:
@@ -159,7 +169,7 @@ def _families(hits: list[dict], limit: int, q: str = "") -> list[dict]:
                         and (graph.family(o["name"]) == fam or o["key"] == fam)]
         members.sort(key=lambda m: (-m["rounds"], len(m["name"])))
         done.update(m["key"] for m in members)
-        head = min(members, key=lambda m: (not graph.INVESTOR_WORDS.search(m["name"]), len(m["name"])))
+        head = min(members, key=lambda m: (-m["rounds"], not graph.INVESTOR_WORDS.search(m["name"]), len(m["name"])))
         ids = [i for m in members for i in m["ids"]][:6]
         out.append({**head, "ids": ids, "rounds": sum(m["rounds"] for m in members),
                     "description": head.get("description") or next((m["description"] for m in members if m.get("description")), None),

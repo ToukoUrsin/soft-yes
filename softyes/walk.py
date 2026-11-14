@@ -110,6 +110,62 @@ def _same_company(a: str, b: str) -> bool:
     return a == b or (min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a)))
 
 
+def _same_deal(a: dict, b: dict) -> bool:
+    """Cala sometimes holds one deal as two round entities (one per report). Same company, and the same
+    day, or the same stage in the same month, or the same stage and amount."""
+    if not a.get("issuer") or not b.get("issuer"):
+        return False
+    ia, ib = a["issuer"], b["issuer"]
+    if not ((ia.get("id") and ia.get("id") == ib.get("id")) or _same_company(graph.norm(ia["name"]), graph.norm(ib["name"]))):
+        return False
+    da, db = a.get("date") or "", b.get("date") or ""
+    if da and da[:10] == db[:10]:
+        return True
+    stage = a.get("stage") == b.get("stage") or not a.get("stage") or not b.get("stage")
+    if stage and da and da[:7] == db[:7]:
+        return True
+    return bool(a.get("stage") and a.get("stage") == b.get("stage") and a.get("amount") and a.get("amount") == b.get("amount")
+                and a.get("currency") == b.get("currency"))
+
+
+def _merge_deals(rounds: dict[str, dict], joined: dict, backed: dict) -> collections.Counter:
+    """Fold duplicate round entities into one deal: investors and sources united, a lead flag from either kept.
+    Returns, per soft yes, how many of its followed rounds were the same deal twice."""
+    kept: list[str] = []
+    folded: collections.Counter = collections.Counter()
+    # graph rounds first, fullest first, so the entity with the most participants is the one that stays
+    for rid in sorted(rounds, key=lambda r: (rounds[r].get("via") == "knowledge", -len(rounds[r]["investors"]))):
+        rd = rounds[rid]
+        twin = next((k for k in kept if _same_deal(rounds[k], rd)), None)
+        if not twin:
+            kept.append(rid)
+            continue
+        base = rounds[twin]
+        have = {graph.norm(i["name"]): i for i in base["investors"]}
+        for i in rd["investors"]:
+            mine = have.get(graph.norm(i["name"]))
+            if mine:
+                mine["is_lead"] = mine["is_lead"] or i["is_lead"]
+                mine["sources"] = (mine["sources"] + [x for x in i["sources"] if x["url"] not in {y["url"] for y in mine["sources"]}])[:6]
+                mine["id"] = mine["id"] or i["id"]
+            else:
+                base["investors"].append(i)
+        base["sources"] = (base["sources"] + [x for x in rd["sources"] if x["url"] not in {y["url"] for y in base["sources"]}])[:6]
+        for k in ("stage", "amount", "currency", "date"):
+            base[k] = base.get(k) or rd.get(k)
+        if base["stage"]:
+            base["stage_name"] = graph.STAGE_NAMES.get(base["stage"], base["stage_name"])
+        base["also"] = base.get("also", []) + [rid]
+        for k in joined.get(rid, set()) & joined.get(twin, set()):
+            folded[k] += 1
+        folded["_all"] += 1
+        joined[twin] |= joined.pop(rid, set())
+        backed[twin] |= backed.pop(rid, set())
+    for rid in [r for r in rounds if r not in kept]:
+        del rounds[rid]
+    return folded
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
@@ -268,7 +324,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                   "description": next((i["description"] for i in invs if i.get("description")), None),
                   # Cala may hold one firm as several entities; say which ones were read as this investor
                   "entities": [{"id": i["id"], "name": i["name"], "rounds": len(i["rounds"]),
-                                "portfolio": len(i["portfolio"])} for i in invs]})
+                                "portfolio": len(i["portfolio"])} for i in invs if i["rounds"] or i["portfolio"]]})
         await emit({"t": "investor", "key": s["key"], "name": s["name"], "rounds": len(all_rounds), "led": len(led),
                     "followed": len(followed), "walking": len(todo), **ledger.as_dict()})
 
@@ -377,6 +433,14 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             await asyncio.gather(*(open_company(c) for c in pick))
 
     await asyncio.gather(*(walk_soft(s) for s in softs))
+    folded = _merge_deals(rounds, joined, backed)
+    for s in softs:   # a deal Cala holds twice counts once
+        n = folded[s["key"]]
+        if n and s.get("rounds_in_cala"):
+            s["rounds_in_cala"] -= n
+            s["followed"] -= n
+            s["duplicates"] = n
+            s["lead_rate"] = round(s["led"] / s["rounds_in_cala"], 2) if s["rounds_in_cala"] else None
 
     # 2. Who led those rounds, and who else sat in them.
     leads: dict[str, dict] = {}
@@ -555,7 +619,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                 counts[e["name"]] = n
         soft_out.append({k: s.get(k) for k in ("key", "name", "ids", "kind", "found", "rounds_in_cala", "led", "followed",
                                                 "lead_rate", "walked", "capped", "pulse", "description", "led_rounds", "cap_companies",
-                                                "entities", "knowledge")}
+                                                "entities", "knowledge", "duplicates")}
                         | {"usual_leads": [{"name": n, "deals": c} for n, c in counts.most_common(5)],
                            "followed_rounds": sorted(
                                ({**_round_brief(rd), "leads": [i["name"] for i in rd["investors"] if i["is_lead"]],
@@ -585,7 +649,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                   "stage_name": graph.STAGE_NAMES.get(want_stage or "", None), "company": inputs.get("company")},
         "headline": _headline(soft_out, first),
         "soft_yeses": soft_out, "leads": first, "second_ring": second_out,
-        "rounds_walked": len(rounds),
+        "rounds_walked": len(rounds), "duplicates_folded": folded["_all"],
         "ledger": ledger.as_dict() | {"facts": facts, "sources": len(urls), "seconds": round(time.time() - t0, 1),
                                       "llm_facts": 0},
         "notes": notes,
