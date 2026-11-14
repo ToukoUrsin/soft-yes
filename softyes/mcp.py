@@ -33,7 +33,12 @@ SEARCH_STORED_S = 3 * 86400   # an investor search stored this recently is given
 SECTORS = {"ai": "artificial intelligence", "a.i.": "artificial intelligence", "genai": "generative ai", "gen ai": "generative ai",
            "ml": "machine learning", "climate": "climate tech", "climatetech": "climate tech", "health": "health tech",
            "healthtech": "health tech", "bio": "biotech", "biotechnology": "biotech", "saas": "software as a service",
-           "defence": "defense", "defence tech": "defense tech", "deep tech": "deeptech"}
+           "defence": "defense", "defence tech": "defense tech", "deep tech": "deeptech", "climate technology": "climate tech",
+           "artificial intelligence ai": "artificial intelligence", "ai ml": "artificial intelligence",
+           "ai/ml": "artificial intelligence", "applied ai": "artificial intelligence", "ai research": "artificial intelligence"}
+PLACES = {"nordic": "Nordics", "nordic countries": "Nordics", "nordic region": "Nordics", "eu": "Europe", "european union": "Europe",
+          "european": "Europe", "baltic": "Baltics", "baltic states": "Baltics", "united states": "US", "usa": "US", "u.s.": "US",
+          "united kingdom": "UK", "u.k.": "UK", "britain": "UK"}
 
 
 def _sector(v) -> str:
@@ -42,6 +47,15 @@ def _sector(v) -> str:
     s = re.sub(r"^(an?|the|my|our) ", "", s)
     s = re.sub(r" (start-?ups?|compan(y|ies)|labs?|industry|sector|space|businesse?s?|products?|tools?)$", "", s).strip()
     return SECTORS.get(s, s)[:60]
+
+
+def _place(v) -> str | None:
+    """'the Nordics', 'Nordic countries' and 'nordics' are one place: one stored search answers them all."""
+    s = re.sub(r"\s+", " ", str(v or "")).strip()[:40]
+    s = re.sub(r"^the ", "", s, flags=re.I)
+    if not s:
+        return None
+    return PLACES.get(s.lower(), s if s.isupper() and len(s) <= 3 else s[0].upper() + s[1:])
 
 
 def _find_key(args: dict) -> str:
@@ -497,7 +511,7 @@ class Server:
                 mine += [{"name": s["name"], "ids": s["ids"]} for s in comp["inputs"]["soft_yeses"] if not have & set(s["ids"])]
             elif not names:
                 unknown.append(str(args["company"]).strip()[:80])
-        inputs = {"sector": sector, "stage": _stage_code(args.get("stage")), "place": str(args.get("place") or "").strip()[:40] or None,
+        inputs = {"sector": sector, "stage": _stage_code(args.get("stage")), "place": _place(args.get("place")),
                   "like": like, "mine": mine[:scout.MINE], "via_company": via}
         key = _find_key(args)
         result, seen = await self._search(inputs, key)
