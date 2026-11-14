@@ -570,6 +570,7 @@ class WalkStore {
    */
   async start(inputs: WalkInputs) {
     this.reset('live', inputs)
+    rememberWalking(inputs)
     const generation = this.state.generation
     const mine = () => this.state.generation === generation
     for (let attempt = 0; ; attempt++) {
@@ -813,4 +814,37 @@ export const walkStore = new WalkStore()
 
 export function useWalk(): WalkState {
   return useSyncExternalStore(walkStore.subscribe, walkStore.get)
+}
+
+
+// --- a walk under way survives a reload: the inputs are kept for this tab until the walk has an id
+
+const WALKING_KEY = 'softyes:walking'
+
+function rememberWalking(inputs: WalkInputs) {
+  try {
+    sessionStorage.setItem(WALKING_KEY, JSON.stringify({ inputs, at: Date.now() }))
+  } catch {
+    /* private mode: a reload then starts over from the form */
+  }
+}
+
+export function forgetWalking() {
+  try {
+    sessionStorage.removeItem(WALKING_KEY)
+  } catch {
+    /* nothing to forget */
+  }
+}
+
+/** The walk this tab was on when it was reloaded, if it started in the last 15 minutes. */
+export function walkingInputs(): WalkInputs | null {
+  try {
+    const raw = sessionStorage.getItem(WALKING_KEY)
+    if (!raw) return null
+    const { inputs, at } = JSON.parse(raw) as { inputs: WalkInputs; at: number }
+    return Date.now() - at < 15 * 60 * 1000 && Array.isArray(inputs?.soft_yeses) && inputs.soft_yeses.length ? inputs : null
+  } catch {
+    return null
+  }
 }

@@ -717,6 +717,32 @@ async def audit():
             "stages": [f for f in rows if f["kind"] == "stage"][:80]}
 
 
+@app.get("/api/backtest")
+async def backtest():
+    """The walk tested on rounds that already happened: each one hidden with everything dated after it, the walk run
+    from its followers, and the real lead looked for on the list. Computed offline from the cache (softyes.backtest)."""
+    b = extras.blob_get("backtest:v1")
+    if not b or not b.get("tested"):
+        return {"available": False}
+    d = b.get("detail") or {}
+    base = d.get("base") or {}
+
+    def part(name: str) -> dict:
+        x = {**(b.get(name) or {}), **(d.get(name) or {})}
+        return {k: x.get(k) for k in ("tested", "hit", "top5", "base_rate", "lift", "median_list")}
+
+    hits = [e for e in b.get("examples") or [] if e.get("rank") and e.get("confirmed_on_page")
+            and e["earlier"]["company"] != e["company"] and e["rank"] <= 8]
+    miss = [e for e in b.get("examples") or [] if not e.get("rank") and len(e.get("followers") or []) == 2]
+    return {"available": True, "computed": b.get("computed"), "method": b.get("method"),
+            "tested": b["tested"], "hit": b["hit"], "top5": b["top5"], "top10": b.get("top10"),
+            "median_list": b.get("median_list"), "base_rate": b.get("base_rate"), "lift": b.get("lift"),
+            "top5_base": base.get("top5_rate"), "chance": base.get("chance_random_does_as_well"),
+            "two": part("two_followers"), "one": part("one_follower"),
+            "followers": d.get("followers_tested"), "years": d.get("years"),
+            "examples": hits[:3] + miss[-1:]}
+
+
 @app.get("/api/check")
 async def check(q: str = "", id: str = ""):
     """The page check for any company: its rounds in Cala, who Cala says led each, and what the cited pages say."""

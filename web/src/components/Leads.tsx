@@ -377,7 +377,7 @@ function Record({ lead, onReach }: { lead: Lead; onReach: () => void }) {
         ) : p ? (
           <>
             <p className="ov__lede">
-              Led <b className="num">{p.led}</b> of <b className="num">{capped(p.rounds, p.capped)}</b> {p.rounds === 1 ? 'round' : 'rounds'} in Cala
+              Cala marks it as lead in <b className="num">{p.led}</b> of <b className="num">{capped(p.rounds, p.capped)}</b> {p.rounds === 1 ? 'round' : 'rounds'}
               {p.led_recent > 0 ? (
                 <>
                   , <b className="num">{p.led_recent}</b> in the last {p.recent_months} months.
@@ -385,6 +385,15 @@ function Record({ lead, onReach }: { lead: Lead; onReach: () => void }) {
               ) : (
                 <>. None of them is dated in the last {p.recent_months} months.</>
               )}
+              {p.led_read ? (
+                <>
+                  {' '}
+                  Soft Yes has read the cited page for <b className="num">{p.led_read}</b> of those so far:{' '}
+                  <b className="num">{p.led_on_page ?? 0}</b> {p.led_on_page === 1 ? 'says' : 'say'} it led.
+                </>
+              ) : p.led > 0 ? (
+                ' No page has been read for those yet.'
+              ) : null}
               {p.capped && ' Cala returns 50 rounds at most, so the real count is higher.'}
               {p.rounds <= 2 && !p.capped && ' Cala’s record of it is thin, so read this as a floor.'}
             </p>

@@ -193,6 +193,12 @@ function SoftYesAsk({ config }: { config: Config | null }) {
           <div className="field">
             <span className="field-label">Who said they’d follow?</span>
             <TokenField tokens={tokens} onChange={setTokens} label="Who said they’d follow?" placeholder="Type an investor’s name" autoFocus />
+            {tokens.length === 1 && (
+              <p className="field-hint">
+                Have a second one? Add it. On past rounds, two followers found the real lead far more often than one.{' '}
+                <Link href="/audit#backtest">See the test</Link>
+              </p>
+            )}
           </div>
 
           <div className="field">

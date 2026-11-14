@@ -210,6 +210,15 @@ export function InvestorPage() {
                   <dd className="num">{p.led_recent}</dd>
                 </div>
               )}
+              {p?.led_read ? (
+                <div>
+                  <dt>Led, and the page says so</dt>
+                  <dd className="num">
+                    {p.led_on_page ?? 0}
+                    <span className="faint"> of {p.led_read} read</span>
+                  </dd>
+                </div>
+              ) : null}
               {s.knowledge?.added ? (
                 <div>
                   <dt>More followed, from reports</dt>

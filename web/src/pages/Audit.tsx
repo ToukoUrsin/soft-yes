@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useReducer, useState, type ReactNode } from 'react'
 import { Link } from 'wouter'
-import { api, type ApiError, type Audit, type ConfirmedRow } from '../lib/api'
+import { api, type ApiError, type Audit, type Backtest, type BacktestPart, type ConfirmedRow } from '../lib/api'
 import { download } from '../lib/export'
-import { cleanQuote, plural } from '../lib/format'
+import { cleanQuote, fmtMonth, plural } from '../lib/format'
 import { AmountFix, ConfirmedItem, LeadFix, StageFix } from '../components/Evidence'
 import { CompanyCheck } from '../components/CompanyCheck'
 import { Icon, N } from '../components/ui'
@@ -139,6 +139,100 @@ function More<T>({ rows, first, render }: { rows: T[]; first: number; render: (r
   )
 }
 
+const pct = (n: number, of: number) => `${Math.round((100 * n) / Math.max(1, of))}%`
+const nth = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`
+
+// Both rows share one scale, so a longer bar is a higher rate.
+function TestRow({ label, part, full }: { label: string; part: BacktestPart; full: number }) {
+  const rate = part.hit / Math.max(1, part.tested)
+  const base = part.base_rate ?? 0
+  return (
+    <div className="bt__row">
+      <dt>{label}</dt>
+      <dd>
+        <span className="bt__line">
+          <i className="bt__bar is-walk" style={{ width: `${(55 * rate) / full}%` }} />
+          <span className="num">
+            <b>{pct(part.hit, part.tested)}</b> <span className="faint">{part.hit} of {part.tested}</span>
+          </span>
+        </span>
+        <span className="bt__line">
+          <i className="bt__bar" style={{ width: `${(55 * base) / full}%` }} />
+          <span className="num faint">{Math.round(100 * base)}% a lead picked at random</span>
+        </span>
+      </dd>
+    </div>
+  )
+}
+
+/** The walk, run on rounds that already happened. Loaded on its own so the audit never waits for it. */
+function Tested() {
+  const [b, set] = useState<Backtest | null>(null)
+  useEffect(() => {
+    const ctl = new AbortController()
+    api.backtest(ctl.signal).then((r) => r.available && set(r), () => undefined)
+    return () => ctl.abort()
+  }, [])
+  // Linked to from the form: the section arrives after the page, so go to it once it is there.
+  useEffect(() => {
+    if (b && window.location.hash === '#backtest') document.getElementById('backtest')?.scrollIntoView({ block: 'start' })
+  }, [b])
+  if (!b) return null
+  const lift = b.two.lift
+  const full = Math.max(b.two.hit / Math.max(1, b.two.tested), b.one.hit / Math.max(1, b.one.tested), b.two.base_rate ?? 0, b.one.base_rate ?? 0, 0.01)
+  return (
+    <section className="audit__sec bt" id="backtest" aria-labelledby="bt-h">
+      <div className="audit__sechead">
+        <div>
+          <h2 id="bt-h">Does the walk find the real lead?</h2>
+          <p>
+            A test on rounds that already happened. Soft Yes hid {b.tested} past rounds one at a time, with everything dated
+            after them, walked from the investors who followed, and looked for the investor who really led.
+          </p>
+        </div>
+      </div>
+      <dl className="bt__rows">
+        <TestRow label="Walked from two followers" part={b.two} full={full} />
+        <TestRow label="Walked from one" part={b.one} full={full} />
+      </dl>
+      <p className="bt__read">
+        {lift ? <>From two followers the real lead is on the list {lift} times as often as chance. </> : null}
+        From one it is no better than chance, so give it two. The order inside the list is not a forecast: the real lead was
+        in the top five in {b.top5} of {b.tested}. Read the list as people your investors can open a door to.
+      </p>
+      {b.examples.length > 0 && (
+        <ul className="bt__cases">
+          {b.examples.map((e) => (
+            <li key={`${e.company}:${e.date}`}>
+              <span className="bt__case">
+                <b>{e.company}</b> <span className="faint">{e.stage_name}, {fmtMonth(e.date)}</span>
+              </span>
+              <span>
+                Led by {e.lead}. Walked from {e.followers.join(' and ')} with that day and everything after hidden:{' '}
+                {e.rank ? (
+                  <>
+                    {e.lead} was <b className="num">{nth(e.rank)} of {e.list_size}</b>
+                    {e.earlier ? <>, through {e.earlier.company} ({fmtMonth(e.earlier.date)}).</> : '.'}
+                  </>
+                ) : (
+                  <>
+                    <b>not among the {e.list_size} names</b>. A miss.
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="faint bt__limits">
+        All {b.tested} rounds: on the list in {b.hit} ({pct(b.hit, b.tested)}), against {Math.round(100 * (b.base_rate ?? 0))}% for a random lead
+        from the same year. A small sample, and the test saw only each investor’s 20 latest rounds with the later ones hidden,
+        so a live walk has more to go on.
+      </p>
+    </section>
+  )
+}
+
 function Skeleton() {
   return (
     <div className="audit__skel" aria-busy="true" aria-label="Loading the page check">
@@ -258,6 +352,8 @@ export function AuditPage() {
               )}
             </section>
           </div>
+
+          <Tested />
 
           <footer className="audit__foot">
             <p>

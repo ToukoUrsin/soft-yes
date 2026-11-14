@@ -32,29 +32,42 @@ export const SceneOpen: React.FC = () => {
 	const {end} = useT();
 	const [c0, c1, c2, c3] = cues('open');
 	const M = cap.walk.marks;
-	const tPick = 1.5; // the second investor is in
-	const tGo = 2.5; // "Find the lead" is clicked here
-	const tFold = c3.s - 0.3; // the walk is done and folds into the ranked list
+	const tGo = 2.1; // "Replay the walk" is clicked here
+	const tFold = c3.s - 0.25; // the walk has folded into the ranked list
 	const but = said('open', 0, 'but');
 	const segs: Seg[] = [
-		[0, tPick, M.type1 - 0.15, M.picked1 + 0.15], // the first name is in, the second is typed
-		[tPick, tGo, M.go - (tGo - tPick) + 0.05], // a cut: the stage is chosen, the button is clicked
-		[tGo, tFold, M.go + 0.05, M.done - 0.15],
-		[tFold, end, M.done - 0.15],
+		[0, tGo, M.go - tGo], // the answer a walk ends on
+		[tGo, tFold, M.go, M.still + 0.1], // the walk, drawn again by the product
+		[tFold, end, M.still + 0.1, M.done - 0.12], // the finished graph stands still
 	];
-	const graph: [number, number, number] = [-60, 150, 2040];
+	const rate = (M.still + 0.1 - M.go) / (tFold - tGo);
+	const g = box('walk', 'graph');
+	const tally = box('walk', 'tally');
+	// the counters and the whole graph under them
+	const gw = ((g[1] + g[3] - tally[1] + 34) * WIN.w) / WIN.h;
+	const graph: [number, number, number] = [960 - gw / 2, tally[1] - 22, gw];
+	// closer: the rows of the graph without the legend under them, first the rounds, then who led them
+	const near = 1600;
+	const who = said('open', 2, 'who');
+	// the label under the first investor moves a little as the graph grows: where it is when the voice says the number
+	const track = W.node_track as number[][];
+	const tc = M.go + (but + 0.3 - tGo) * rate;
+	const node = (track.filter((k) => k[0] <= tc).pop() ?? track[0]).slice(1) as Box;
+	const nodeBox: Box = [node[0] - 6, node[1] - 6, node[2] + 12, node[3] + 12];
 	const cams: Cam[] = [
-		{t: 0, r: [0, 76, 1400]},
-		{t: tGo + 0.55, d: 0.5, r: graph},
-		{t: but + 0.5, d: 0.8, r: fit(box('walk', 'node'), 940, {ax: 0.2, top: 250})},
-		{t: c1.s + 1.0, d: 0.9, r: graph},
-		{t: tFold + 1.0, d: 0.8, r: [0, 76, 1920]},
+		{t: 0, r: [0, 56, 1920]},
+		{t: tGo, d: tGo - 0.1, r: [14, 62, 1892]},
+		{t: tGo + 0.5, d: 0.45, r: graph},
+		{t: but + 0.5, d: 0.8, r: fit(nodeBox, 940, {ax: 0.2, top: 250})},
+		{t: c1.s + 1.0, d: 0.9, r: [24, g[1] + 10, near]},
+		{t: who + 0.5, d: 1.1, r: [1920 - 24 - near, g[1] + 10, near]},
+		{t: tFold + 0.45, d: 0.7, r: graph},
 	];
 	const his: Hi[] = [
-		{box: box('walk', 'field'), from: 0.1, to: tPick, pad: 0},
-		{box: box('walk', 'node'), from: but + 0.3, to: c1.s + 0.3, pad: 6},
-		{box: box('walk', 'headline'), from: tFold + 0.9, to: end + 1, pad: 4},
-		{box: box('walk', 'tally'), from: tFold + 1.2, to: end + 1, pad: 2},
+		{box: box('walk', 'replay'), from: tGo - 0.75, to: tGo + 0.1, pad: 0},
+		{box: nodeBox, from: but + 0.3, to: c1.s + 0.3, pad: 4},
+		{box: box('walk', 'ranked'), from: tFold + 0.5, to: end + 1, pad: 2},
+		{box: tally, from: tFold + 0.9, to: end + 1, pad: 6},
 	];
 	const ty = W.tally;
 	const n = W.node;
@@ -91,15 +104,15 @@ const Score: React.FC<{label: string[]; steps: {t: number; n: number; ok?: boole
 	const p = pop(frame, F(cur.t), 12, 0.5);
 	const col = cur.ok ? C.accent : i > 0 ? C.amber : C.text;
 	return (
-		<div style={{position: 'absolute', right: 22, top: 20, width: 330, padding: '16px 22px 16px', borderRadius: 18, background: 'rgba(10,10,10,0.94)', border: `2px solid ${col}99`, boxShadow: `0 18px 60px rgba(0,0,0,0.7), 0 0 50px ${col}22`, opacity: a, transform: `translateY(${(1 - a) * -14}px)`, fontFamily: SANS}}>
-			<div style={{fontFamily: MONO, fontSize: 17, fontWeight: 700, letterSpacing: 1.2, color: C.dim, lineHeight: 1.35}}>
+		<div style={{position: 'absolute', right: 20, top: 18, width: 300, padding: '12px 20px 10px', borderRadius: 16, background: 'rgba(10,10,10,0.96)', border: `2px solid ${col}99`, boxShadow: `0 6px 18px rgba(0,0,0,0.6), 0 0 30px ${col}1c`, opacity: a, transform: `translateY(${(1 - a) * -14}px)`, fontFamily: SANS}}>
+			<div style={{fontFamily: MONO, fontSize: 16, fontWeight: 700, letterSpacing: 1.1, color: C.dim, lineHeight: 1.3}}>
 				{label.map((l) => (
 					<div key={l}>{l}</div>
 				))}
 			</div>
 			<div style={{display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 2}}>
-				<div style={{fontSize: 150, fontWeight: 700, letterSpacing: -6, lineHeight: 1, color: col, transform: `scale(${0.7 + 0.3 * p})`, transformOrigin: '20% 80%', fontVariantNumeric: 'tabular-nums'}}>{cur.n}</div>
-				<div style={{fontSize: 27, fontWeight: 600, color: col, letterSpacing: -0.4, lineHeight: 1.15}}>{cur.note}</div>
+				<div style={{fontSize: 116, fontWeight: 700, letterSpacing: -5, lineHeight: 1, color: col, transform: `scale(${0.7 + 0.3 * p})`, transformOrigin: '20% 80%', fontVariantNumeric: 'tabular-nums'}}>{cur.n}</div>
+				<div style={{fontSize: 25, fontWeight: 600, color: col, letterSpacing: -0.4, lineHeight: 1.15}}>{cur.note}</div>
 			</div>
 		</div>
 	);
@@ -108,34 +121,36 @@ export const SceneTurn: React.FC = () => {
 	const {frame, t, end} = useT();
 	const [c0, c1, c2, c3, c4, c5] = cues('turn');
 	const M = cap.check.marks;
-	const ML = cap.lead.marks;
-	const [f0, f1] = FINDS;
-	const tOpen = c2.s - 0.5; // the page check line is clicked open
+		const [f0, f1] = FINDS;
+	const tDown = c1.s - 0.5; // the page scrolls from the answer to the page check under it
+	const tFind = tDown + 2.3; // one correction fills the window
 	const tPage = said('turn', 2, 'says') - 0.1; // cut to the page Cala cites
 	const tBack = c3.s - 0.2;
-	const tHolds = c4.s - 0.2; // cut to the round that holds
+	const tHolds = c4.s - 0.2; // back up to the round that holds
 	const tSum = c5.s - 0.15;
 	const lead0 = said('turn', 2, firstWord(f0.page[0]));
 	const lead1 = said('turn', 3, firstWord(f1.page[0]));
 	const write = said('turn', 5, 'write');
 	const gone = said('turn', 5, 'gone');
 	const a: Seg[] = [
-		[0, tOpen, Math.max(0, M.open - 0.1 - tOpen), M.open - 0.1], // the page stands still until the line is clicked open
-		[tOpen, tPage, M.open - 0.1],
+		[0, tDown, M.top + 0.2, M.top + 2.4], // the answer stands still
+		[tDown, tPage, M.strip - 1.0], // down to the page check, then the pointer goes to the first correction
 	];
 	// one finding fills the window: the claim struck through, the page's sentence under it
 	const findCam = (b: Box): [number, number, number] => [b[0] - 21, b[1] - 34, b[2] + 72];
 	const strip = box('check', 'strip');
 	const camsA: Cam[] = [
 		{t: 0, r: [0, 0, 1920]},
-		{t: c0.s + 2.0, d: 1.3, r: fit(box('check', 'toprow'), 1320, {ax: 0.7, top: 290})},
-		{t: c1.s + 0.7, d: 0.8, r: [10, strip[1] - 160, 1900]},
-		{t: tOpen + 0.75, d: 0.6, r: findCam(box('check', 'find0'))},
+		{t: tDown, d: tDown - 0.1, r: [12, 4, 1896]},
+		{t: tDown + 1.0, d: 0.9, r: [10, strip[1] - 96, 1900]},
+		{t: tFind + 0.6, d: 0.6, r: findCam(box('check', 'find0'))},
 	];
 	const hisA: Hi[] = [
-		{box: box('check', 'toprow'), from: c0.s + 1.9, to: c1.s + 0.2, pad: 3},
-		{box: box('check', 'counts'), from: c1.s + 0.6, to: tOpen + 0.2, pad: 2},
-		{box: box('check', 'cala0'), from: tOpen + 0.7, to: end, pad: 4, color: C.amber},
+		{box: box('check', 'name'), from: c0.s + 1.5, to: tDown, pad: 3},
+		{box: box('check', 'startl0'), from: said('turn', 0, 'led') - 0.1, to: tDown, pad: 0},
+		{box: box('check', 'counts'), from: tDown + 1.1, to: tFind, pad: 2},
+		{box: box('check', 'cala0'), from: tFind + 0.6, to: end, pad: 4, color: C.amber},
+		{box: box('check', 'src0'), from: tFind + 1.0, to: end, pad: 2},
 	];
 	const three = said('turn', 0, firstWord(String(c0.line.text.match(/led (\w+) rounds/)?.[1] ?? 'led')));
 	const a5 = interpolate(t, [tSum, tSum + 0.3], [0, 1], clamp);
@@ -152,7 +167,7 @@ export const SceneTurn: React.FC = () => {
 					{t: c1.s, text: 'Soft Yes opens the page Cala cites for each one'},
 					{t: c2.s, text: `${f0.company}: the page says ${f0.page[0]} led`},
 					{t: c3.s, text: `${f1.company}: the page says ${f1.page[0]} led`},
-					{t: c4.s, text: `${L.company}: confirmed on the page, word for word`},
+					{t: c4.s, text: `${K.company}: confirmed on the page, word for word`},
 					{t: c5.s, text: `${K.claimed} lead claims became ${K.held}`},
 				]}
 			/>
@@ -183,25 +198,27 @@ export const SceneTurn: React.FC = () => {
 					]}
 				/>
 				<Shot
-					clip="lead"
+					clip="check"
 					from={tHolds}
 					to={tSum}
-					segs={[[tHolds, tSum, ML.quote + 0.4]]}
+					segs={[[tHolds, tSum, M.holds + 0.2]]}
 					cams={[
-						{t: 0, r: [650, box('lead', 'round')[1] - 8, 1222]},
-						{t: tSum, d: tSum - tHolds, r: [656, box('lead', 'round')[1] - 6, 1210]},
+						{t: 0, r: [22, box('check', 'name')[1] - 26, 876]},
+						{t: tSum, d: tSum - tHolds, r: [26, box('check', 'name')[1] - 23, 866]},
 					]}
-					his={[{box: box('lead', 'quote'), from: c4.s + 0.1, to: end, pad: 2}]}
+					his={[
+						{box: box('check', 'proof'), from: c4.s + 0.1, to: end, pad: 0},
+						{box: box('check', 'onpage'), from: said('turn', 4, 'word') - 0.1, to: end, pad: 0},
+					]}
 				/>
 				<Shot clip="check" from={tSum} segs={[[tSum, end, M.both + 0.4]]} cams={[{t: 0, r: fit(box('check', 'both'), 1900, {top: 60})}]} />
 				<Score
 					label={[`ROUNDS ${firstWord(K.top).toUpperCase()} LED`, `NEXT TO ${String(K.with).toUpperCase()}`]}
-					to={tSum}
+					to={tHolds}
 					steps={[
 						{t: three - 0.1, n: K.claimed, note: 'Cala says'},
 						{t: lead0, n: K.claimed - 1, note: 'still stand'},
-						{t: lead1, n: K.claimed - 2, note: 'still stands'},
-						{t: said('turn', 4, 'holds'), n: K.held, ok: true, note: 'holds, word for word'},
+						{t: lead1, n: K.claimed - 2, note: K.claimed - 2 === 1 ? 'still stands' : 'still stand'},
 					]}
 				/>
 				{a5 > 0 ? (
@@ -232,14 +249,14 @@ export const SceneLead: React.FC = () => {
 	const still = box('lead', 'still');
 	return (
 		<SceneFade>
-			<Head tag="THE LEAD" items={[{t: 0, text: `${L.name} still leads: ${plural(L.recent, 'round')} in the last ${L.months} months`}]} />
+			<Head tag="THE LEAD" items={[{t: 0, text: `Cala has ${L.name} leading ${plural(L.recent, 'round')} in the last ${L.months} months`}]} />
 			<Stage>
 				<Shot
 					clip="lead"
 					segs={[[0, end, M.bars - 0.7]]}
 					cams={[
-						{t: 0, r: [650, still[1] - 40, 1222]},
-						{t: end, d: end - 0.2, r: [652, still[1] - 36, 1213]},
+						{t: 0, r: [650, still[1] - 78, 1222]},
+						{t: end, d: end - 0.2, r: [652, still[1] - 75, 1216]},
 					]}
 					his={[{box: still, from: 0.7, to: end + 1, pad: 2}]}
 				/>
@@ -257,7 +274,7 @@ export const SceneAsk: React.FC = () => {
 	const tFacts = said('ask', 1, 'against') - 0.2;
 	const draft = box('ask', 'draft');
 	const facts = box('ask', 'facts');
-	const wide = (b: Box): [number, number, number] => [b[0] - 32, b[1] - 60, b[2] + 64];
+	const wide = (b: Box): [number, number, number] => [b[0] - 32, b[1] - 92, b[2] + 64]; // from under the founder's fields to the heading of the fact list
 	return (
 		<SceneFade>
 			<Head
@@ -279,11 +296,11 @@ export const SceneAsk: React.FC = () => {
 					segs={[[tDraft, tFacts, M.checked - (c1.s - tDraft) - 0.2]]}
 					cams={[
 						{t: 0, r: wide(draft)},
-						{t: tFacts, d: tFacts - tDraft - 0.1, r: [draft[0] - 24, draft[1] - 44, draft[2] + 48]},
+						{t: tFacts, d: tFacts - tDraft - 0.1, r: [draft[0] - 28, draft[1] - 88, draft[2] + 56]},
 					]}
 					his={[{box: box('ask', 'checked'), from: c1.s + 0.1, to: end, pad: 2}]}
 				/>
-				<Shot clip="ask" from={tFacts} segs={[[tFacts, end, M.facts - 0.3]]} cams={[{t: 0, r: [facts[0] - 19, facts[1] - 15, 1020]}]} />
+				<Shot clip="ask" from={tFacts} segs={[[tFacts, end, M.facts - 0.3]]} cams={[{t: 0, r: [facts[0] - 19, facts[1] - 15, Math.max(1020, ((facts[3] + 30) * WIN.w) / WIN.h)]}]} />
 			</Stage>
 		</SceneFade>
 	);
@@ -297,7 +314,7 @@ export const SceneAudit: React.FC = () => {
 	const tType = c1.s - 0.25;
 	const tTyped = tType + 0.25 + (M.asked - M.type); // the name is in, typed at real speed
 	const tAnswer = Math.max(tTyped + 0.5, said('audit', 1, 'read') + 0.35); // cut to the answer: the seconds the pages take to load are not shown
-	const tSafe = said('audit', 2, 'a', 0) - 0.2; // "A fact is safe to act on ..."
+	const tSafe = said('audit', 2, 'fact') - 0.4; // "A fact is safe to act on ..."
 	const hold = said('audit', 0, 'hold') - 0.6;
 	const wrong = said('audit', 0, 'wrong') - 0.7;
 	const segs: Seg[] = [
@@ -306,16 +323,15 @@ export const SceneAudit: React.FC = () => {
 		[tTyped, tAnswer, M.asked],
 		[tAnswer, end, M.answer0 - 0.15, M.answer0 + 4.0],
 	];
-	const legend = box('audit', 'n_confirmed');
-	const answer: [number, number, number] = [40, box('audit', 'summary')[1] - 150, 1345]; // the company, its summary, the first round with its sentence
+	// the title, the totals and the form under them; the list of random claims further down stays out of the picture
+	const form = box('audit', 'form');
+	const top: [number, number, number] = [28, form[1] + form[3] + 20 - (1190 * WIN.h) / WIN.w, 1190];
+	const answer: [number, number, number] = [36, box('audit', 'summary')[1] - 150, 1385]; // the company, its summary, the first round with its sentence
 	const cams: Cam[] = [
-		{t: 0, r: [0, 0, 1920]},
-		{t: c0.s + 1.5, d: 1.0, r: [28, 104, 1190]},
-		{t: hold + 0.2, d: 0.9, r: [30, legend[1] - 100, 1176]},
-		{t: tType, d: 0.02, r: [0, 0, 1920]},
-		{t: tAnswer - 0.05, d: tAnswer - tType - 0.1, r: [10, 6, 1900]},
+		{t: 0, r: top},
+		{t: tAnswer - 0.05, d: tAnswer - 0.2, r: [top[0] + 3, top[1] + 4, top[2] - 8]},
 		{t: tAnswer, d: 0.02, r: answer},
-		{t: end, d: end - tAnswer - 0.1, r: [answer[0] + 6, answer[1] + 4, answer[2] - 22]},
+		{t: end, d: end - tAnswer - 0.1, r: [answer[0] + 3, answer[1] + 2, answer[2] - 10]},
 	];
 	const his: Hi[] = [
 		{box: box('audit', 'n_confirmed'), from: hold, to: tType, pad: 2},
@@ -329,7 +345,7 @@ export const SceneAudit: React.FC = () => {
 			<Head
 				tag="CHECK US"
 				items={[
-					{t: 0, text: `Every walk so far: ${num(U.pages)} pages read`},
+					{t: 0, text: `Every walk so far: ${num(U.pages)} pages read, ${num(U.claims)} lead claims checked`},
 					{t: hold - 0.6, text: `${num(U.confirmed)} lead claims confirmed word for word · ${num(U.corrected)} corrected`},
 					{t: c1.s, text: `Type any company. Here: ${U.company}`},
 					{t: tAnswer, text: `${U.claim}: here is the page’s sentence`},
@@ -379,8 +395,8 @@ export const SceneNext: React.FC = () => {
 					]}
 					cams={[
 						{t: 0, r: [row[0] - (listW - row[2]) / 2, row[1] - 12, listW]},
-						{t: tSlush, d: 0.02, r: [0, 30, 1920]},
-						{t: tReady, d: tReady - tSlush - 0.1, r: [20, 40, 1880]},
+						{t: tSlush, d: 0.02, r: [0, 0, 1920]},
+						{t: tReady, d: tReady - tSlush - 0.1, r: [12, 0, 1896]},
 					]}
 					his={[
 						{box: says, from: 0.5, to: tSlush, pad: 2},
@@ -394,8 +410,8 @@ export const SceneNext: React.FC = () => {
 					from={tReady}
 					segs={[[tReady, end, MA.copy - 1.0]]}
 					cams={[
-						{t: 0, r: [draft[0] - 32, draft[1] - 60, draft[2] + 64]},
-						{t: end, d: end - tReady, r: [draft[0] - 26, draft[1] - 56, draft[2] + 44]},
+						{t: 0, r: [draft[0] - 32, draft[1] - 92, draft[2] + 64]},
+						{t: end, d: end - tReady, r: [draft[0] - 28, draft[1] - 89, draft[2] + 56]},
 					]}
 					his={[{box: box('ask', 'copy'), from: tReady + 0.5, to: end + 1, pad: 3}]}
 				/>

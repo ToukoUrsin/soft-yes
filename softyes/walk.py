@@ -384,9 +384,13 @@ def _set_aside_stages(items: list[dict]) -> None:
             d["stage"], d["stage_name"] = None, "Round"
 
 
+STRONGER = ("lead", "follower", "report", "other", "unstated", "absent", "off", "unread")   # which outcome of two is kept
+PAGE_READ = ("lead", "other", "unstated", "absent")   # the cited page was read; only "lead" means it says so
+
+
 def _pulse(inv: dict, dates: dict[str, str] | None = None, led_too: dict[str, dict] | None = None,
            canon: dict[str, str] | None = None, not_led: set[str] | None = None,
-           labels: dict[str, str] | None = None) -> dict:
+           labels: dict[str, str] | None = None, checks: dict[str, str] | None = None) -> dict:
     """What an investor's own round list says about how it behaves.
 
     One date per round, used for the chart, the recent count and "last led" alike: the round's own date when this
@@ -394,8 +398,11 @@ def _pulse(inv: dict, dates: dict[str, str] | None = None, led_too: dict[str, di
     `led_too`: rounds whose own record names this investor as lead, even if its round list does not say so.
     `canon`: round ids Cala holds twice for one deal -> the id that is kept, so a deal counts once.
     `not_led`: rounds where the page Cala cites names another lead: counted as joined, not led.
+    `checks`: round id -> what the cited page said about this investor leading it, for the rounds any walk has opened.
+    Cala's lead flag is counted as before; beside it goes how many of those rounds a page was read for, and confirms.
     """
     dates, led_too, canon, not_led, labels = dates or {}, led_too or {}, canon or {}, not_led or set(), labels or {}
+    checks = checks or {}
     rounds, seen = [], set()
     for r in inv["rounds"]:
         rid = canon.get(r["id"], r["id"])
@@ -427,15 +434,31 @@ def _pulse(inv: dict, dates: dict[str, str] | None = None, led_too: dict[str, di
     led_recent = sum(1 for r in led if (_months_ago(r["when"]) or 999) <= RECENT_MONTHS)
     stages = collections.Counter(r["label"] for r in led if r["label"])
     latest = max((r for r in led if r["when"]), key=lambda r: r["when"], default=None)
+    recent = [r for r in led if (_months_ago(r["when"]) or 999) <= RECENT_MONTHS]
     return {"rounds": len(rounds), "led": len(led), "lead_rate": round(len(led) / len(rounds), 2) if rounds else None,
             "led_recent": led_recent, "recent_months": RECENT_MONTHS, "by_year": filled,
+            "led_read": sum(1 for r in led if checks.get(r["id"]) in PAGE_READ),
+            "led_on_page": sum(1 for r in led if checks.get(r["id"]) == "lead"),
+            "led_recent_read": sum(1 for r in recent if checks.get(r["id"]) in PAGE_READ),
+            "led_recent_on_page": sum(1 for r in recent if checks.get(r["id"]) == "lead"),
             # the latest round it led, and whether this walk opened it (a real date) or only saw it reported
-            "last_led": {"id": latest["id"], "when": latest["when"], "opened": latest["id"] in dates} if latest else None,
+            "last_led": {"id": latest["id"], "when": latest["when"], "opened": latest["id"] in dates,
+                         "check": checks.get(latest["id"])} if latest else None,
             "led_stages": [{"stage": s, "n": n} for s, n in stages.most_common(5)],
             "capped": inv["capped"], "portfolio_size": len(inv["portfolio"])}
 
 
-def _record(key: str, inv: dict, dates: dict, led: dict, canon: dict, not_led: set, labels: dict) -> dict:
+def _stronger(a: str | None, b: str | None) -> str | None:
+    """Of two outcomes for one claim, the one that says more."""
+    if a not in STRONGER:
+        return b
+    if b not in STRONGER:
+        return a
+    return min(a, b, key=STRONGER.index)
+
+
+def _record(key: str, inv: dict, dates: dict, led: dict, canon: dict, not_led: set, labels: dict,
+            checks: dict[str, str] | None = None) -> dict:
     """What every walk so far has learned about this investor's own rounds, joined with what this one learned.
 
     A walk opens only some of an investor's rounds, so two walks used to count the same investor differently
@@ -445,7 +468,8 @@ def _record(key: str, inv: dict, dates: dict, led: dict, canon: dict, not_led: s
     own |= {canon[i] for i in own if i in canon}
     mine = {"dates": {k: v for k, v in dates.items() if k in own and v}, "led_too": dict(led),
             "canon": {k: v for k, v in canon.items() if k in own or v in own},
-            "not_led": sorted(not_led), "labels": {k: v for k, v in labels.items() if k in own and v}}
+            "not_led": sorted(not_led), "labels": {k: v for k, v in labels.items() if k in own and v},
+            "checks": dict(checks or {})}
     try:
         old = extras.blob_get("record2:" + key) or {}
     except Exception:
@@ -468,14 +492,17 @@ def _record(key: str, inv: dict, dates: dict, led: dict, canon: dict, not_led: s
             "dates": {**mine["dates"], **(old.get("dates") or {})},
             "labels": {**mine["labels"], **(old.get("labels") or {})},
             "led_too": {**mine["led_too"], **(old.get("led_too") or {})},
-            "not_led": sorted(set(old.get("not_led") or []) | set(mine["not_led"]))}
+            "not_led": sorted(set(old.get("not_led") or []) | set(mine["not_led"])),
+            # what a page said about a round stays said: every walk counts confirmations from all walks so far
+            "checks": {r: _stronger(mine["checks"].get(r), (old.get("checks") or {}).get(r))
+                       for r in sorted(set(mine["checks"]) | set(old.get("checks") or {}))}}
     # Cala can hold one firm as several entities, and a walk does not always meet all of them: keep every round seen
     held = {r["id"]: r for r in old.get("rounds") or []}
     for r in inv["rounds"]:
         held.setdefault(r["id"], {k: r.get(k) for k in ("id", "label", "is_lead", "reported")})
         held[r["id"]]["is_lead"] = bool(held[r["id"]]["is_lead"] or r["is_lead"])
     both["rounds"] = sorted(held.values(), key=lambda r: (r.get("reported") or "", r["id"]))
-    for field in ("dates", "labels"):
+    for field in ("dates", "labels", "checks"):
         for x, rep in both["canon"].items():
             if x in both[field]:
                 both[field].setdefault(rep, both[field][x])
@@ -623,7 +650,9 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
     p = e.get("pulse")
     recent = e.get("led_recent") or 0
     if recent:
-        out.append({"tone": "good", "text": f"Led {_plural(recent, 'round')} in the last {RECENT_MONTHS} months"})
+        read, ok = (p or {}).get("led_recent_read") or 0, (p or {}).get("led_recent_on_page") or 0
+        out.append({"tone": "good", "text": f"Cala has it leading {_plural(recent, 'round')} in the last {RECENT_MONTHS} months"
+                                            + (f"; the pages read so far confirm {ok} of {read}" if read else "")})
     elif p and p["rounds"]:
         out.append({"tone": "warn", "text": f"No lead dated in the last {RECENT_MONTHS} months in Cala"})
     if p and p["rounds"] >= 3:
@@ -744,7 +773,7 @@ def _headline(softs: list[dict], leads: list[dict]) -> str:
     if second and second["tier"] == top["tier"] and second["score"] >= 0.92 * top["score"]:
         return line + f" or {second['name']}: Cala's record puts them level."   # too close to call one first
     if top.get("led_recent"):
-        line += (f": it led {n} of those rounds and {_plural(top['led_recent'], 'round')} "
+        line += (f": it led {n} of those rounds, and Cala has it leading {_plural(top['led_recent'], 'round')} "
                  f"in the last {RECENT_MONTHS} months.")
     else:
         line += "."
@@ -1228,16 +1257,28 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
     _set_aside_stages(everything)
     # a stage read from an opened round replaces the label on the investor's list ("Series E" next to "last led: Series B")
     labels = {d["id"]: d["stage_name"] for d in everything if d.get("stage") and d.get("id")}
+    said: dict[str, dict[str, str]] = collections.defaultdict(dict)   # investor -> round -> what its page said
+    for rid, who, status in claims:
+        said[who][canon.get(rid, rid)] = _stronger(status, said[who].get(canon.get(rid, rid)))
+
+    def checks_for(e: dict) -> dict[str, str]:
+        mine = dict(said.get(e["key"], {}))
+        for d in list(e.get("evidence") or []) + list(e.get("_verified") or []) + list(e.get("led_rounds") or []):
+            status = (d.get("check") or {}).get("status")
+            if status and d.get("id"):
+                mine[canon.get(d["id"], d["id"])] = _stronger(status, mine.get(canon.get(d["id"], d["id"])))
+        return mine
+
     for e in order + second:
         if e.get("_inv"):
-            k = _record(e["key"], e["_inv"], dates_for(e), led_too(e), canon, not_led_by(e), labels)
+            k = _record(e["key"], e["_inv"], dates_for(e), led_too(e), canon, not_led_by(e), labels, checks_for(e))
             e["pulse"] = _pulse({**e["_inv"], "rounds": k.get("rounds") or e["_inv"]["rounds"]}, k["dates"], k["led_too"],
-                                k["canon"], set(k["not_led"]), k["labels"])
+                                k["canon"], set(k["not_led"]), k["labels"], k.get("checks"))
     for s in softs:
         if s.get("_inv"):
-            k = _record(s["key"], s["_inv"], opened, {}, canon, not_led_by(s), labels)
+            k = _record(s["key"], s["_inv"], opened, {}, canon, not_led_by(s), labels, checks_for(s))
             s["pulse"] = _pulse({**s["_inv"], "rounds": k.get("rounds") or s["_inv"]["rounds"]}, k["dates"], k["led_too"],
-                                k["canon"], set(k["not_led"]), k["labels"])
+                                k["canon"], set(k["not_led"]), k["labels"], k.get("checks"))
 
     # 6. Final shape.
     def doubt(e: dict) -> dict | None:

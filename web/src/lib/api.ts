@@ -96,6 +96,11 @@ export interface Pulse {
   lead_rate: number | null
   led_recent: number
   recent_months: number
+  /** Of the rounds Cala marks it as leading: how many had their cited page read, and how many of those say it led. */
+  led_read?: number
+  led_on_page?: number
+  led_recent_read?: number
+  led_recent_on_page?: number
   by_year: YearCount[]
   led_stages: { stage: string; n: number }[]
   capped: boolean
@@ -367,6 +372,8 @@ export interface Says {
     led: number | null
     lead_rate: number | null
     led_recent: number | null
+    led_read?: number | null
+    led_on_page?: number | null
     recent_months: number | null
     led_stages: { stage: string; n: number }[]
     last_led: RoundWithSources | null
@@ -473,6 +480,7 @@ const qs = (params: Record<string, string | undefined | null>) =>
 export const api = {
   config: () => request<Config>('/api/config'),
   audit: (signal?: AbortSignal) => request<Audit>('/api/audit', { signal }),
+  backtest: (signal?: AbortSignal) => request<Backtest>('/api/backtest', { signal }),
   check: (by: { q?: string; id?: string }, signal?: AbortSignal) => request<CompanyCheck>(`/api/check?${qs(by)}`, { signal }),
   examples: () => request<{ examples: Example[] }>('/api/examples'),
   suggest: (q: string, signal?: AbortSignal) =>
@@ -503,4 +511,34 @@ export const api = {
 export function investorHref(ids: string[], name?: string | null): string {
   const base = `/investor/${ids.slice(0, 6).join(',')}`
   return name ? `${base}?name=${encodeURIComponent(name)}` : base
+}
+
+/** The walk run on rounds that already happened, with each round and everything after it hidden. */
+export interface BacktestPart { tested: number; hit: number; top5: number; base_rate: number | null; lift: number | null; median_list: number | null }
+export interface BacktestExample {
+  company: string
+  stage_name: string
+  date: string
+  lead: string
+  followers: string[]
+  rank: number | null
+  list_size: number
+  earlier: { company: string; date: string } | null
+}
+export interface Backtest {
+  available: boolean
+  tested: number
+  hit: number
+  top5: number
+  top10: number | null
+  median_list: number | null
+  base_rate: number | null
+  lift: number | null
+  top5_base: number | null
+  chance: number | null
+  two: BacktestPart
+  one: BacktestPart
+  followers: number | null
+  years: Record<string, number> | null
+  examples: BacktestExample[]
 }

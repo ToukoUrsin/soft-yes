@@ -4,7 +4,7 @@ import { api, type ApiError, type Result } from '../lib/api'
 import { download, proofLine, toCsv, toMarkdown } from '../lib/export'
 import { fmtDate, listOr, plural } from '../lib/format'
 import { rememberRun, useConfig, useMedia } from '../lib/store'
-import { pagesLine, useWalk, walkStore, type WalkState } from '../lib/walk'
+import { forgetWalking, pagesLine, useWalk, walkingInputs, walkStore, type WalkState } from '../lib/walk'
 import { AmountFix, ClaimStrip, LeadFix, StageFix } from '../components/Evidence'
 import { Answer } from '../components/Answer'
 import { LeadDetail, LeadList, useSays, type Tab } from '../components/Leads'
@@ -268,8 +268,16 @@ export function Run() {
 
   // /r/live is only a place to stand while a walk has no id yet.
   useEffect(() => {
-    if (live && walk.phase === 'idle') navigate('/', { replace: true })
-    if (live && walk.runId) navigate(`/r/${walk.runId}`, { replace: true })
+    if (live && walk.phase === 'idle') {
+      // Reloaded mid-walk: ask for the same walk again. Cala's answers so far are kept, so it catches up fast.
+      const again = walkingInputs()
+      if (again) void walkStore.start(again)
+      else navigate('/', { replace: true })
+    }
+    if (live && walk.runId) {
+      forgetWalking()
+      navigate(`/r/${walk.runId}`, { replace: true })
+    }
   }, [live, walk.phase, walk.runId, navigate])
 
   // A permalink opened cold: load the stored run and show it finished.

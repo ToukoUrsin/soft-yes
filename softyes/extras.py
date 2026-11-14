@@ -189,8 +189,9 @@ def cala_facts(result: dict, lead: dict) -> list[str]:
                 facts.append(f"{name} led {n} rounds that {a['name']} took part in.")
     p = lead.get("pulse")
     if p and p["rounds"]:
-        facts.append(f"Cala has {p['rounds']} funding rounds for {name}; it led {p['led']} of them"
-                     + (f", {p['led_recent']} in the last {p['recent_months']} months." if p["led_recent"] else "."))
+        facts.append(f"Cala has {p['rounds']} funding rounds for {name} and marks it as lead in {p['led']} of them"
+                     + (f", {p['led_recent']} in the last {p['recent_months']} months." if p["led_recent"] else ".")
+                     + (f" The cited pages read so far confirm {p['led_on_page']} of {p['led_read']}." if p.get("led_read") else ""))
     if lead.get("last_led"):
         facts.append(f"The most recent round {name} led in Cala: {deal_phrase(lead['last_led'])}.")
     for s in result["soft_yeses"]:
@@ -495,6 +496,7 @@ async def says(cala: Cala, lead: dict) -> dict:
     p = lead.get("pulse") or {}
     did = {"rounds": p.get("rounds"), "led": p.get("led"), "lead_rate": p.get("lead_rate"),
            "led_recent": p.get("led_recent"), "recent_months": p.get("recent_months"), "led_stages": p.get("led_stages", []),
+           "led_read": p.get("led_read"), "led_on_page": p.get("led_on_page"),
            "last_led": lead.get("last_led")}
     if hit:
         return {**hit, "did": did}

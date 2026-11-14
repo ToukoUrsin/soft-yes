@@ -400,6 +400,14 @@ function Did({ says, lead }: { says: Says; lead: Lead }) {
               <b>{d.led_recent ?? 0}</b> led
             </dd>
           </div>
+          {d.led_read ? (
+            <div>
+              <dt>Pages read</dt>
+              <dd className="num">
+                <b>{d.led_on_page ?? 0}</b> of {d.led_read} say it led
+              </dd>
+            </div>
+          ) : null}
           {d.led_stages.length > 0 && (
             <div>
               <dt>Stages it led</dt>
