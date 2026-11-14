@@ -10,7 +10,7 @@ Laptop on https://claude.ai/new in Chrome, Soft Yes on. Paste both messages once
 Soft Yes is in Claude and it doesn't guess. It asks Cala's graph for companies like ours. It reads their rounds and who invested. Then it reads Cala's record of each investor.
 
 **0:35** *Point at the first investor, then at the chain under it.*
-Ovni Capital led a pre-seed like ours this month. The sentence under it is from Cala's source. Nobody we know has invested with Ovni, so it reads further. Kfund is one of Cala's own investors. Kfund sat in a round with FJ Labs, FJ Labs with Contrarian, Contrarian with Ovni. Three introductions, and each one is a round in Cala. Over 1,100 facts from Cala. Zero from a language model.
+Ovni Capital led a pre-seed like ours this month. The sentence under it is from Cala's source. Nobody we know has invested with Ovni, so Soft Yes reads further. Start at Kfund, one of Cala's own investors. Kfund sat in a round with FJ Labs, FJ Labs with Contrarian, Contrarian with Ovni. Three introductions, each one a round in Cala. Over 1,100 facts from Cala. Zero from a language model.
 
 **1:00** *Switch to a second tab with the second message already pasted. Press Enter.*
 Later an investor says "we're in if you find a lead". That's a soft yes. Let's say Tesi and Innovestor told us that. Soft Yes finds who led the rounds they joined. Emergence Capital led Verda's round with Tesi in it. So Tesi can introduce us.
@@ -30,7 +30,7 @@ One click writes the ask to Tesi. Every fact in it is listed right under it.
 - **Does it find the real lead?** We took 57 old rounds, hid who led, and gave it two investors who joined. It had the real lead 13 times. Guessing gets 6.
 - **Why in Claude?** Founders already ask Claude who to talk to. Now the answer comes from Cala's graph with the page behind it, not from what a model remembers.
 - **Does Claude make up anything in the card?** No. The card is our code and Cala's data. What Claude writes under it is Claude's.
-- **How far does it read?** Three introductions. Each one is a round both funds sat in, and the page for it is one click away.
+- **How far does it read?** Three introductions. Each one is a round both funds sat in, and its source page is one click away.
 - **Why Cala, why not web search?** Search gives you pages. This is a question about who was in which round, and Cala answers it in one call per investor, with the page behind each fact.
 - **Cala was wrong 19 times. Is that a problem for you?** It's why this works. Every fact comes with its page, so we can check it.
 - **What about the other 230 claims?** For 156 the page names no lead, and 77 pages wouldn't open. We show both and never count them as confirmed.

@@ -21,7 +21,7 @@ Say while it draws:
 The card comes in about 25 s. Point at:
 
 1. The list. **Ovni Capital** and **Contrarian Ventures** led Bleu Robotics's €5M pre-seed this month. The sentence from thesaasnews.com is under it. Click an investor to open it.
-2. **The way in**, under Ovni. None of Cala AI's investors has sat in a round with Ovni, so the search read further: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital. Each step is a round both sat in, and the round's name opens its page. **Accel** is one step: 3 rounds with Lightspeed.
+2. **The way in**, under Ovni. None of Cala AI's investors has sat in a round with Ovni, so the search read further. Point down the chain: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital. Kfund is already Cala AI's investor, so that's three introductions. Each one is a round both sat in. Click a round's name to open its page. **Accel** is one step: 3 rounds with Lightspeed.
 3. The numbers: 1,172 facts from Cala, 15 pages read, 0 from a language model.
 4. The dots next to each investor: one for each thing its own record in Cala says. The line under the graph names them, left to right: your field, leads rounds, pre-seed, active now, round size, near you, a way in. Few dots means Cala has little on that fund. The last dot is a ring when the way in takes two or three introductions. Open an investor and each dot is one line with the count behind it.
 
