@@ -1220,6 +1220,10 @@ async def check_company(cala: Cala, cid: str, name: str, limit: int = 8) -> dict
 
     rows = await read(graph.company_rounds, cid) or []
     rows.sort(key=lambda r: r["reported"] or "", reverse=True)
+    backers = None
+    if not rows:   # Cala can hold a company's investors without any of its rounds: say so, there is no lead to check
+        prof = await read(graph.company, cid)
+        backers = len((prof or {}).get("investors") or [])
     rds = [rd for rd in await asyncio.gather(*(read(graph.funding_round, r["id"]) for r in rows[:limit])) if rd]
     for rd in rds:
         rd["issuer"] = rd["issuer"] or {"id": cid, "name": name}
@@ -1243,7 +1247,7 @@ async def check_company(cala: Cala, cid: str, name: str, limit: int = 8) -> dict
                     "others": sum(1 for i in rd["investors"] if i["name"] not in said and not i["is_lead"]),
                     "pages": [{"url": p["url"], "publisher": p.get("publisher"), "status": p["status"]}
                               for p in (c or {}).get("pages", [])]})
-    return {"company": {"id": cid, "name": name}, "rounds": out, "rounds_in_cala": len(rows),
+    return {"company": {"id": cid, "name": name}, "rounds": out, "rounds_in_cala": len(rows), "investors_in_cala": backers,
             "page_check": {"rounds": tally["rounds"], "pages": tally["pages"], "confirmed": tally["lead"],
                            "corrected": tally["corrected"], "added": tally["promoted"],
                            "unstated": tally["unstated"] + tally["absent"], "unread": tally["unread"] + tally["off"],

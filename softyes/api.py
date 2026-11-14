@@ -626,10 +626,11 @@ async def check(q: str = "", id: str = ""):
             out = None
             for f in found[:4]:   # Cala can hold a company twice: take the entity that has the rounds
                 got = await walk_mod.check_company(c, f["id"], f["name"])
-                out = out or got
                 if got["rounds"]:
                     out = got
                     break
+                if out is None or (got.get("investors_in_cala") or 0) > (out.get("investors_in_cala") or 0):
+                    out = got   # no rounds anywhere: the entity Cala knows investors for
             id = out["company"]["id"]
         else:
             prof = await graph.company(c, id, cache_only=False)

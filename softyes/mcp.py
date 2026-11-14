@@ -157,7 +157,10 @@ class Server:
             return _error(f"Cala does not know a company called {name}.")
         co = d["company"]["name"]
         if not d["rounds"]:
-            return {"content": [{"type": "text", "text": f"Cala holds no funding rounds for {co}."}], "isError": False,
+            n = d.get("investors_in_cala")
+            return {"content": [{"type": "text", "text": f"Cala holds no funding rounds for {co}"
+                                 + (f", only {n} investors without their rounds, so there is no lead claim to check."
+                                    if n else ".")}], "isError": False,
                     "structuredContent": {"company": co, "rounds": []}}
         out, rows = [f"# {co}: who led, by the page Cala cites", ""], []
         for r in d["rounds"]:
