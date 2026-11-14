@@ -46,8 +46,10 @@ export const SceneOpen: React.FC = () => {
 	// the counters and the whole graph under them
 	const gw = ((g[1] + g[3] - tally[1] + 34) * WIN.w) / WIN.h;
 	const graph: [number, number, number] = [960 - gw / 2, tally[1] - 22, gw];
-	// closer: the rows of the graph without the legend under them, first the rounds, then who led them
-	const near = 1600;
+	// closer, while the leads come in: the rounds and who led them, no word cut at the edge of the window
+	const ranked = box('walk', 'ranked');
+	const rw = Math.max(1440, ((g[3] - 60) * WIN.w) / WIN.h);
+	const right: [number, number, number] = [ranked[0] + ranked[2] + 22 - rw, g[1] + 6, rw];
 	const who = said('open', 2, 'who');
 	// the label under the first investor moves a little as the graph grows: where it is when the voice says the number
 	const track = W.node_track as number[][];
@@ -59,15 +61,15 @@ export const SceneOpen: React.FC = () => {
 		{t: tGo, d: tGo - 0.1, r: [14, 62, 1892]},
 		{t: tGo + 0.5, d: 0.45, r: graph},
 		{t: but + 0.5, d: 0.8, r: fit(nodeBox, 940, {ax: 0.2, top: 250})},
-		{t: c1.s + 1.0, d: 0.9, r: [24, g[1] + 10, near]},
-		{t: who + 0.5, d: 1.1, r: [1920 - 24 - near, g[1] + 10, near]},
-		{t: tFold + 0.45, d: 0.7, r: graph},
+		{t: c1.s + 1.0, d: 0.9, r: graph},
+		{t: who + 0.4, d: 1.0, r: right},
+		{t: tFold + 0.55, d: 0.7, r: graph},
 	];
 	const his: Hi[] = [
 		{box: box('walk', 'replay'), from: tGo - 0.75, to: tGo + 0.1, pad: 0},
 		{box: nodeBox, from: but + 0.3, to: c1.s + 0.3, pad: 4},
-		{box: box('walk', 'ranked'), from: tFold + 0.5, to: end + 1, pad: 2},
-		{box: tally, from: tFold + 0.9, to: end + 1, pad: 6},
+		{box: ranked, from: tFold + 0.6, to: end + 1, pad: 2},
+		{box: tally, from: tFold + 1.0, to: end + 1, pad: 6},
 	];
 	const ty = W.tally;
 	const n = W.node;
@@ -300,7 +302,7 @@ export const SceneAsk: React.FC = () => {
 					]}
 					his={[{box: box('ask', 'checked'), from: c1.s + 0.1, to: end, pad: 2}]}
 				/>
-				<Shot clip="ask" from={tFacts} segs={[[tFacts, end, M.facts - 0.3]]} cams={[{t: 0, r: [facts[0] - 19, facts[1] - 15, Math.max(1020, ((facts[3] + 30) * WIN.w) / WIN.h)]}]} />
+				<Shot clip="ask" from={tFacts} segs={[[tFacts, end, M.facts - 0.3]]} cams={[{t: 0, r: [facts[0] - 19, facts[1] - 15, facts[2] + 38]}]} />
 			</Stage>
 		</SceneFade>
 	);
