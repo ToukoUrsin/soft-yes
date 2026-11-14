@@ -9,10 +9,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from . import cala as cala_mod
-from . import extras, graph, walk as walk_mod
+from . import extras, graph, mcp as mcp_mod, walk as walk_mod
 from .cala import BASE, CREDIT_CAP, BudgetExceeded, CalaError, Ledger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -106,7 +106,7 @@ def _credits() -> dict:
 async def config():
     return {"framing": FRAMING, "stages": [{"id": s, "name": graph.STAGE_NAMES[s]} for s in graph.STAGE_ORDER[:5]],
             "credits": _credits(), "index_size": len(INDEX), "gemini": extras.gemini_ready(),
-            "oxylabs": extras.oxylabs_ready(), "slush": extras.slush_directory()}
+            "oxylabs": extras.oxylabs_ready(), "slush": extras.slush_directory(), "mcp": f"{mcp_mod.PUBLIC_URL}/mcp"}
 
 
 @app.get("/api/examples")
@@ -404,6 +404,34 @@ async def references(run_id: str, lead_key: str):
 async def slush(run_id: str, lead_key: str):
     result, lead = _lead(run_id, lead_key)
     return await extras.slush(lead)
+
+
+def _load_annotated(run_id: str) -> dict | None:
+    result = load_run(run_id)
+    return _annotate(result) if result else None
+
+
+MCP = mcp_mod.Server(suggest=lambda name: suggest(name), run=lambda inputs, emit: _run(inputs, emit), load=_load_annotated)
+
+
+@app.post("/mcp")
+async def mcp(request: Request):
+    """Soft Yes for a founder's own assistant: MCP over streamable HTTP, a plain JSON reply per request."""
+    try:
+        body = await request.json()
+    except ValueError:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, status_code=400)
+    messages = body if isinstance(body, list) else [body]
+    replies = [r for r in [await MCP.handle(m) for m in messages if isinstance(m, dict)] if r]
+    if not replies:
+        return Response(status_code=202)
+    return JSONResponse(replies if isinstance(body, list) else replies[0])
+
+
+@app.get("/mcp")
+async def mcp_get():
+    return JSONResponse({"detail": "This is an MCP server. Add this address to your assistant as a connector, or POST JSON-RPC."},
+                        status_code=405, headers={"Allow": "POST"})
 
 
 @app.get("/api/health")

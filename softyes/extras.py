@@ -154,6 +154,10 @@ def fact_sheet(result: dict, lead: dict, founder: dict) -> list[str]:
         who = " and ".join(d["with"])
         verb = "led" if lead["ring"] == 1 else "took part in"
         facts.append(f"{name} {verb} {deal_phrase(d)}. {who} took part in that round.")
+    if lead["ring"] == 1:
+        for a in lead.get("asks") or []:
+            if a["deals"] > 1:
+                facts.append(f"{name} led {a['deals']} rounds that {a['name']} took part in.")
     p = lead.get("pulse")
     if p and p["rounds"]:
         facts.append(f"Cala has {p['rounds']} funding rounds for {name}; it led {p['led']} of them"
@@ -162,7 +166,7 @@ def fact_sheet(result: dict, lead: dict, founder: dict) -> list[str]:
         facts.append(f"The most recent round {name} led in Cala: {deal_phrase(lead['last_led'])}.")
     for s in result["soft_yeses"]:
         if any(s["name"] in d["with"] for d in lead["evidence"]) and s.get("rounds_in_cala"):
-            facts.append(f"{s['name']} led {s['led']} of its {s['rounds_in_cala']} rounds in Cala and followed in {s['followed']}.")
+            facts.append(f"Cala lists {s['rounds_in_cala']} rounds for {s['name']}: it led {s['led']} and followed in {s['followed']}.")
     softs = sorted({w for d in lead["evidence"] for w in d["with"]})
     if softs:
         facts.append(f"{' and '.join(softs)} told the founder: we will invest once a lead investor is in. (The founder's own statement.)")
@@ -245,23 +249,30 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
     ask = lead.get("ask") or {}
     soft = ask.get("name") or ""
     brief = {
-        "intro_ask": f"An email from the founder to their contact at {soft}, who said {soft} will invest once a lead investor is in. "
-                     f"Open with 'Hi,'. Ask for an introduction to {lead['name']}, using the most recent shared deal as the reason "
-                     f"(one deal, with its amount and month). 60-90 words. End with a two-line blurb they can forward, which states "
-                     f"the round being raised exactly as in FACTS. Do not mention Cala or counts of rounds.",
-        "direct": f"A cold email from the founder to a partner at {lead['name']}, asking for a first call about leading the round. "
-                  f"Open with 'Hi,' and what the company does, then say {soft} has said it will follow once a lead is in and cite "
-                  f"the most recent deal they did together (with its amount and month). State the round being raised exactly as in "
-                  f"FACTS. Ask for 25 minutes. 60-90 words. Do not mention Cala or counts of rounds.",
-        "slush": f"A meeting request note for the Slush meeting tool, from the founder to {lead['name']}. Hard limit 280 characters, "
-                 f"two or three sentences. Say what the company does in a few words, that {soft} has said it will follow once a lead "
-                 f"is in, name the one most recent deal {lead['name']} and {soft} did together, and ask for 25 minutes at Slush about "
-                 f"leading. Do not mention Cala or counts of rounds.",
+        "intro_ask": f"An email from the founder to the person at {soft} who told them {soft} will invest once a lead investor is "
+                     f"in. Write to that person as 'you': {soft} is 'you', never 'they' or its name. Open with 'Hi,'. First recall "
+                     f"that they said they would join once a lead is in. Then ask for one introduction, to {lead['name']}, and give "
+                     f"the reason as something they know first hand: the most recent round {lead['name']} led that they were in "
+                     f"(company, stage, month), and how many such rounds there are if FACTS give more than one. Add one short "
+                     f"sentence from FACTS on how many rounds {lead['name']} led in the last 24 months, as the reason to ask now. "
+                     f"End with a two-line blurb they can forward: what the company does, and the round being raised exactly as in "
+                     f"FACTS. 70-100 words. Do not mention Cala.",
+        "direct": f"A cold email from the founder to a partner at {lead['name']}. Write to them as 'you': {lead['name']} is "
+                  f"'you', never its name or 'they'. Open with 'Hi,', then one sentence on what the company does and the round "
+                  f"being raised exactly as in FACTS. Then say {soft} has told us it will invest once a lead is in. Then why you "
+                  f"write to them first: the most recent round they led with {soft} in it (company, stage, month, and the amount "
+                  f"only if FACTS give one), and how many such rounds there are if FACTS give more than one. Ask for 25 minutes. "
+                  f"60-90 words. Do not mention Cala.",
+        "slush": f"A meeting request note for the Slush meeting tool, from the founder to {lead['name']}. Write to them as 'you'. "
+                 f"Hard limit 280 characters, two or three sentences: what the company does in a few words and the round being "
+                 f"raised, that {soft} will invest once a lead is in, the most recent round they led with {soft} in it (company "
+                 f"and stage), and a request for 25 minutes at Slush. Do not mention Cala.",
     }[kind]
     system = ("You write short, plain fundraising messages for a startup founder. Use ONLY the facts in FACTS. "
               "Never add a name, number, date, title, sector or claim that is not in FACTS. No flattery, no buzzwords, "
-              "no exclamation marks, no em dashes. First person plural for the company. Where a fact is missing "
-              "(company name, what it does, round), write a bracketed placeholder like [your company]. "
+              "no exclamation marks, no em dashes, no repeated phrases. Sound like a founder writing to someone they have "
+              "met: direct and warm. First person plural for the company. Only three things may be a bracketed placeholder "
+              "when FACTS lack them: [your company], [what you do], [your round]. Any other missing detail is left out. "
               'Return JSON: {"subject": "...", "body": "..."}. For a Slush note the subject is empty.')
     user = "FACTS:\n" + "\n".join(f"- {f}" for f in facts) + f"\n\nWRITE: {brief}"
     unsupported: list[str] = []

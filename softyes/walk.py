@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import re
 import hashlib
 import json
 import time
@@ -56,6 +57,24 @@ def _stage_weight(stage: str | None, want: str | None) -> float:
 def _months_ago(iso: str | None) -> float | None:
     y = graph.years_ago(iso)
     return None if y is None else y * 12
+
+
+def _nearest(srcs: list[dict], when: str | None, limit: int) -> list[dict]:
+    """Sources for a round, the page dated closest to the round first: that is the one that reports it.
+    Cala also attaches older pages about the same company, which state other amounts."""
+    seen, out = set(), []
+    for x in srcs:
+        if x["url"] not in seen:
+            seen.add(x["url"])
+            out.append(x)
+    if when:
+        def gap(x: dict) -> int:
+            try:
+                return abs((date.fromisoformat(x["date"][:10]) - date.fromisoformat(when[:10])).days)
+            except (TypeError, ValueError):
+                return 10 ** 6
+        out.sort(key=gap)
+    return out[:limit]
 
 
 def _round_brief(rd: dict) -> dict:
@@ -191,6 +210,8 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
                                 f"{_names(sorted({w for d in cap for w in d['with']}))} backs"})
     else:
         out.append({"tone": "plain", "text": f"Sat in {_plural(n, 'round')} with {_names(softs)} without leading"})
+    if e.get("doubt"):
+        out.append({"tone": "warn", "text": "Cala may have tied this name to the wrong company"})
     p = e.get("pulse")
     recent = e.get("led_recent") or 0
     if recent:
@@ -208,7 +229,7 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
     f = e.get("fit")
     if f:
         out.append({"tone": "good", "text": f"Has led at {f['stage_name']}"} if f["match"] else
-                   {"tone": "warn", "text": f"No {f['stage_name']} lead in Cala"})
+                   {"tone": "warn", "text": f"Cala lists no {f['stage_name']} round it led"})
     return out
 
 
@@ -224,16 +245,16 @@ def _verdict(s: dict) -> tuple[str, str]:
         return "unknown", f"Cala has no funding rounds for {name}, so there is nothing to walk from it."
     cap = " (the first 50 Cala returns)" if s.get("capped") else ""
     if n + k < 4:
-        return "thin", (f"Cala's graph holds only {_plural(n, 'round')} for {name}; it led {led}. "
+        return "thin", (f"Cala's graph holds only {_plural(n, 'round')} for {name}, and it led {led}. "
                         f"Too few to call a habit.{more}")
-    count = f"{led} of the {n + k} rounds Cala knows for it ({n} in its graph, {k} more in reports)" if k else \
-        f"{led} of its {n} rounds in Cala{cap}"
+    count = (f"Cala knows {n + k} rounds for {name} ({n} in its graph, {k} more in reports). It led {led} of them." if k else
+             f"Cala lists {n} rounds for {name}{cap}. It led {led} of them.")
     rate = led / (n + k)
     if rate >= 0.5:
-        return "leads", f"{name} led {count}. It leads more often than it follows: ask what would make it lead yours."
+        return "leads", f"{count} It leads more often than it follows, so ask what would make it lead yours."
     if rate >= 0.25:
-        return "mixed", f"{name} led {count}. It does lead sometimes: worth asking what is missing."
-    return "follows", f"{name} led {count}. It follows by habit, so the lead has to come from someone else."
+        return "mixed", f"{count} It does lead sometimes, so ask what is missing."
+    return "follows", f"{count} It follows by habit, so the lead has to come from someone else."
 
 
 def _headline(softs: list[dict], leads: list[dict]) -> str:
@@ -463,7 +484,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         out = []
         for rid, link in e["rounds"].items():
             rd = rounds[rid]
-            srcs = link["sources"] or rd["sources"]
+            srcs = _nearest(link["sources"] + rd["sources"], rd["date"], 4)
             out.append({**_round_brief(rd), "date_is_report": rd.get("date_is_report", False),
                         "with": [next(s["name"] for s in softs if s["key"] == k) for k in link["with"]],
                         "with_keys": link["with"],
@@ -473,7 +494,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                         # "graph": a funding-round entity in Cala. "knowledge": a report Cala's knowledge search read.
                         "via": rd.get("via", "graph"),
                         "investors": None if rd.get("via") == "knowledge" else len(rd["investors"]),
-                        "sources": srcs[:4]})
+                        "sources": srcs})
         out.sort(key=lambda d: d["date"] or "", reverse=True)
         return out
 
@@ -558,7 +579,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             if rd:
                 if not rd["date"]:
                     rd["date"] = r["reported"]
-                got.append({**_round_brief(rd), "sources": (r["sources"] or rd["sources"])[:3]})
+                got.append({**_round_brief(rd), "sources": _nearest(r["sources"] + rd["sources"], rd["date"], 3)})
                 await emit({"t": "verify", "key": e["key"], "round": _round_brief(rd), **ledger.as_dict()})
 
         await asyncio.gather(*(one(r) for r in todo))
@@ -568,12 +589,26 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
     await asyncio.gather(*(verify(e) for e in final_order[:VERIFY_TOP] + second[:2]))
 
     # 6. Final shape.
+    def doubt(e: dict) -> dict | None:
+        """Cala sometimes ties an investor's name to the wrong legal entity. One case can be told from Cala's own
+        record: it does not describe the entity as an investor, and the entity is younger than the round it led."""
+        desc = ((e.get("_inv") or {}).get("description") or "").strip()
+        m = re.search(r"founded in (\d{4})", desc)
+        years = [int(d["date"][:4]) for d in e["evidence"] if d.get("date")]
+        if not m or not years or graph.INVESTOR_WORDS.search(desc) or int(m.group(1)) <= min(years):
+            return None
+        return {"founded": int(m.group(1)), "round_year": min(years), "description": desc,
+                "text": f"Cala's record under this name reads \"{desc.rstrip('.')}\", yet it is listed leading a round in "
+                        f"{min(years)}. The name is probably tied to the wrong company in Cala: read the source before you use it."}
+
     def finish(e: dict) -> dict:
         ev = e["evidence"]
         pulse = e.get("pulse")
         led_known = [{k: d[k] for k in ("id", "issuer", "stage", "stage_name", "date", "amount", "currency", "sources")}
                      for d in ev] if e["ring"] == 1 else []
-        led_known += e.get("_verified", [])
+        for d in e.get("_verified", []):
+            if not any(_same_deal(d, k) for k in led_known):  # one deal held as two round entities shows once
+                led_known.append(d)
         led_known.sort(key=lambda d: d["date"] or "", reverse=True)
         last_led = next((d for d in led_known if d["date"]), None)
         # Rounds it led in the last two years: the graph's count, or the dated rounds in hand if those are more.
@@ -581,6 +616,9 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         led_recent = max((pulse or {}).get("led_recent") or 0, in_hand)
         # A lead that keeps leading counts for more; one with no recent lead on record counts as unproven.
         e["score"] *= 0.6 + min(1.0, led_recent / 4) * 0.8
+        unsure = doubt(e)
+        if unsure:
+            e["score"] *= 0.3
         per_soft = collections.defaultdict(list)
         for d in ev:
             for k, name in zip(d["with_keys"], d["with"]):
@@ -598,7 +636,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         amounts = sorted(d["amount"] for d in led_known if d["amount"] and d["currency"] in ("EUR", "USD"))
         return {"key": e["key"], "id": e["ids"][0] if e["ids"] else None, "ids": e["ids"], "name": e["name"], "kind": e["kind"],
                 "ring": e["ring"], "score": round(e["score"], 3), "evidence": ev, "ask": ask[0] if ask else None,
-                "asks": ask, "pulse": pulse, "led_recent": led_recent, "record": e.get("record"),
+                "asks": ask, "pulse": pulse, "led_recent": led_recent, "record": e.get("record"), "doubt": unsure,
                 "recent_leads": led_known[:4], "last_led": last_led, "fit": fit,
                 "typical_round": {"min": amounts[0], "max": amounts[-1], "n": len(amounts)} if amounts else None,
                 "portfolio": e.get("portfolio", [])}
@@ -624,7 +662,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                            "followed_rounds": sorted(
                                ({**_round_brief(rd), "leads": [i["name"] for i in rd["investors"] if i["is_lead"]],
                                  "relation": "round" if s["key"] in joined[rid] else "cap_table",
-                                 "via": rd.get("via", "graph"), "sources": rd["sources"][:2]}
+                                 "via": rd.get("via", "graph"), "sources": _nearest(rd["sources"], rd["date"], 2)}
                                 for rid, rd in rounds.items() if s["key"] in joined[rid] or s["key"] in backed[rid]),
                                key=lambda d: d["date"] or "", reverse=True)})
 
