@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import os
 import time
@@ -181,23 +182,62 @@ def _families(hits: list[dict], limit: int, q: str = "") -> list[dict]:
     return out[:limit]
 
 
+NICKNAMES = {"a16z": "Andreessen Horowitz", "yc": "Y Combinator", "usv": "Union Square Ventures",
+             "nea": "New Enterprise Associates", "kp": "Kleiner Perkins"}
+
+
+def _close(q: str, limit: int = 3) -> list[dict]:
+    """A misspelt name ("Sequioa", "Andreesen Horowitz"): investors Cala has rounds for whose name is nearly the same."""
+    want = graph.root(q)[0] or graph.norm(q)
+    if len(want) < 5:
+        return []
+    roots: dict[str, dict] = {}
+    for e in INDEX.values():
+        if e["rounds"] > 0:
+            r = graph.root(e["name"])[0] or e["key"]
+            if r not in roots or roots[r]["rounds"] < e["rounds"]:
+                roots[r] = e
+    return [roots[r] for r in difflib.get_close_matches(want, list(roots), n=limit, cutoff=0.82) if r != want]
+
+
+def _related(q: str, name: str) -> bool:
+    """Cala's search returns its nearest names even for a name it does not know; keep only real near-matches."""
+    a, b = graph.root(q)[0] or graph.norm(q), graph.root(name)[0] or graph.norm(name)
+    return bool(a and b) and (a.startswith(b) or b.startswith(a) or difflib.SequenceMatcher(None, a, b).ratio() >= 0.7)
+
+
 @app.get("/api/suggest")
 async def suggest(q: str = "", limit: int = 7):
     q = q.strip()[:60]
     if len(q) < 2:
         return {"items": [], "source": "none"}
+    nick = NICKNAMES.get(graph.norm(q))
     local = _local_hits(q, 20)
     source = "index"
-    if len(q) >= 3 and not any(e["rounds"] for e in local):  # nothing with a track record locally: ask Cala
+    if len(q) >= 3 and not nick and not any(e["rounds"] for e in local):  # nothing with a track record locally: ask Cala
         try:
             found = await graph.search(cala_mod.get(), q, limit=8)
             for f in found:
                 _index_add(f["id"], f["raw_name"], f["type"], f["description"])
-            local = _local_hits(q, 20) or [INDEX[graph.norm(f["name"])] for f in found if graph.norm(f["name"]) in INDEX]
+            local = _local_hits(q, 20) or [INDEX[graph.norm(f["name"])] for f in found
+                                           if graph.norm(f["name"]) in INDEX and _related(q, f["name"])]
             source = "cala"
         except CalaError:
             source = "index"
-    return {"items": [{**e, "known_rounds": e["rounds"]} for e in _families(local, limit, q)], "source": source}
+    near = [] if nick or any(e["rounds"] for e in local) else _close(q)
+    items, seen = [], set()
+    known_as = _families(_local_hits(nick, 3), 1, nick) if nick else []
+    for e in known_as + [{**f, "did_you_mean": True} for f in _families(near, 3, q)] + _families(local, limit, q):
+        shown = e["name"].lower()
+        if shown in seen:   # two Cala entities that read the same: one row, both ids
+            first = next(i for i in items if i["name"].lower() == shown)
+            first["ids"] = list(dict.fromkeys(first["ids"] + e["ids"]))[:6]
+            first["rounds"] += e["rounds"]
+            first["entities"] = (first["entities"] + e.get("entities", []))[:6]
+            continue
+        seen.add(shown)
+        items.append(dict(e))
+    return {"items": [{**e, "known_rounds": e["rounds"]} for e in items[:limit]], "source": source}
 
 
 @app.get("/api/company")
