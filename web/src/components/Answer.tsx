@@ -38,6 +38,11 @@ export function Answer({
   const withWhom = round && round.relation !== 'cap_table' && round.with.length ? `with ${listAnd(round.with)}` : ''
   const unnamed = round ? round.with.filter((_, i) => round.with_on_page?.[i] === false) : []
   // Cala's record does not always single one lead out: two can be level, or the rounds can be too few to rank.
+  // What the page check took away from this lead: rounds Cala has it leading where the cited page names someone else.
+  const wrong = lead.ring === 1
+    ? new Set(result.page_check?.findings.filter((f) => f.kind === 'lead' && f.cala === lead.name).map((f) => f.round)).size
+    : 0
+  const held = lead.evidence.filter((e) => e.check?.status === 'lead').length
   const mode = result.start?.mode ?? 'pick'
   const level = mode === 'tie' ? result.leads.find((e) => e.key !== lead.key && result.start?.keys.includes(e.key)) : undefined
   return (
@@ -90,6 +95,12 @@ export function Answer({
             )}
             <CheckNote check={check} who={lead.name} promoted={round?.promoted} />
           </div>
+        )}
+        {wrong > 0 && (
+          <p className="answer__cut">
+            Cala has it leading <b className="num">{lead.evidence.length + wrong}</b> rounds your investors joined. The pages confirm{' '}
+            <b className="num">{held}</b> and name another lead for <b className="num">{wrong}</b>.
+          </p>
         )}
         {says && <SaysRow lead={lead} says={says} />}
         <button type="button" className="answer__more" onClick={() => onOpen('record')}>

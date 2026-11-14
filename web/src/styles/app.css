@@ -4071,3 +4071,16 @@ main.page {
   color: var(--warn);
   white-space: nowrap;
 }
+
+/* What the page check took away from the first lead. */
+.answer__cut {
+  max-width: 44em;
+  font-size: var(--fs-s);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.answer__cut b {
+  font-weight: 560;
+  color: var(--text);
+}

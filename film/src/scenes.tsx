@@ -46,11 +46,7 @@ export const SceneOpen: React.FC = () => {
 	// the counters and the whole graph under them
 	const gw = ((g[1] + g[3] - tally[1] + 34) * WIN.w) / WIN.h;
 	const graph: [number, number, number] = [960 - gw / 2, tally[1] - 22, gw];
-	// closer, while the leads come in: the rounds and who led them, no word cut at the edge of the window
 	const ranked = box('walk', 'ranked');
-	const rw = Math.max(1440, ((g[3] - 60) * WIN.w) / WIN.h);
-	const right: [number, number, number] = [ranked[0] + ranked[2] + 22 - rw, g[1] + 6, rw];
-	const who = said('open', 2, 'who');
 	// the label under the first investor moves a little as the graph grows: where it is when the voice says the number
 	const track = W.node_track as number[][];
 	const tc = M.go + (but + 0.3 - tGo) * rate;
@@ -62,8 +58,6 @@ export const SceneOpen: React.FC = () => {
 		{t: tGo + 0.5, d: 0.45, r: graph},
 		{t: but + 0.5, d: 0.8, r: fit(nodeBox, 940, {ax: 0.2, top: 250})},
 		{t: c1.s + 1.0, d: 0.9, r: graph},
-		{t: who + 0.4, d: 1.0, r: right},
-		{t: tFold + 0.55, d: 0.7, r: graph},
 	];
 	const his: Hi[] = [
 		{box: box('walk', 'replay'), from: tGo - 0.75, to: tGo + 0.1, pad: 0},
@@ -149,7 +143,6 @@ export const SceneTurn: React.FC = () => {
 	];
 	const hisA: Hi[] = [
 		{box: box('check', 'name'), from: c0.s + 1.5, to: tDown, pad: 3},
-		{box: box('check', 'startl0'), from: said('turn', 0, 'led') - 0.1, to: tDown, pad: 0},
 		{box: box('check', 'counts'), from: tDown + 1.1, to: tFind, pad: 2},
 		{box: box('check', 'cala0'), from: tFind + 0.6, to: end, pad: 4, color: C.amber},
 		{box: box('check', 'src0'), from: tFind + 1.0, to: end, pad: 2},

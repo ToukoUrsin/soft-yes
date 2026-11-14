@@ -24,8 +24,16 @@ whose number changed is made again. Leave `--music` out to keep the music alread
 length. `node scripts/make-vo.mjs --print` prints the narration. First time only: `cd film && npm install`.
 
 One shot only: `uv run -q --with playwright python film/capture/capture.py lead` (shots: `walk check
-page lead ask audit next`; `walk` first, the others open the run it made). Each shot writes the time
-it was recorded to `src/data/cap.json` (`at`, UTC).
+page lead ask audit next`, in any order). Each shot writes the time it was recorded to
+`src/data/cap.json` (`at`, UTC).
+
+No shot starts a new walk, so recording costs no Cala credits. Every run-page shot opens the stored
+Tesi + Innovestor result, `/r/5c6518e3ff` (set `FILM_RUN=<id>` to film another finished run). The
+`walk` shot opens that page on its answer and clicks "Replay the walk", which draws the same walk
+again from the stored result.
+
+A quick look before a full render: `cd film && scripts/sheets.sh` writes one frame a second as 3x3
+sheets (about 15 seconds). `node scripts/reveal.mjs` prints the second of the reveal frame.
 
 ## What is where
 
@@ -42,6 +50,8 @@ it was recorded to `src/data/cap.json` (`at`, UTC).
 | `src/ui.tsx`, `src/Film.tsx` | The stage the footage plays in, headlines, captions, music ducking. |
 | `render.sh` | Remotion render, loudness to -16 LUFS, and the reveal frame saved as `out/screenshot.png`. |
 | `scripts/review.sh` | Contact sheets (a frame every 2 s), loudness, black-stretch check. |
+| `scripts/sheets.sh` | One frame a second straight from the timeline, without a full render. |
+| `scripts/reveal.mjs` | The second at which the walk has folded into the ranked list (the screenshot frame). |
 
 Many-file output is kept out of git, under `/bulk2/runs/cala/film/` (no backups; set `FILM_BULK` to
 move it): `public/cap/` the recorded clips, `public/audio/` voice and music, `render/` the raw
@@ -50,7 +60,7 @@ render, `review/` contact sheets, `explore/`, `chk/` and `ref/` scratch from mak
 ## Rules the film keeps
 
 - No mock-ups and no invented numbers. If a shot cannot find what it needs, it fails instead of guessing.
-- Footage that is sped up carries a speed mark in the corner of the window. The walk itself plays at real speed.
+- Footage that is sped up carries a speed mark in the corner of the window.
 - A draft whose first version was dropped by the check is shown only if a real one comes back at
   capture time (`ask.facts.dropped`); it is never staged.
 - The company typed into the request ("Tundra Power") is made up, as a founder's own three lines would be.

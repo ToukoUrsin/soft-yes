@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import html as html_mod
+import hashlib
 import json
 import os
 import re
@@ -340,6 +341,14 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
     user = "FACTS:\n" + "\n".join(f"- {f}" for f in facts) + f"\n\nWRITE: {brief}"
     unsupported: list[str] = []
     dropped: list[str] = []   # what an earlier draft added beyond the facts, so the founder can see the check at work
+    # The same facts and the same words from the founder get the same message: a reload does not reword it or wait again.
+    memo = "draft:" + hashlib.sha1("\x1f".join((kind, GEMINI_MODEL, system, user)).encode()).hexdigest()
+    kept = blob_get(memo)
+    if kept and not verify_draft(re.sub(r"\[[^\]]*\]", " ", kept["subject"] + "\n" + kept["body"]), facts, founder):
+        was = kept.get("dropped") or []
+        return _finish(kind, kept["subject"], kept["body"], result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=was,
+                       note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
+                            + (f" Its first draft was dropped: it added {', '.join(was[:4])}." if was else ""))
     for attempt in range(2):
         out = await gemini_json(system, user + (f"\n\nYour last draft used words that are not in FACTS: {', '.join(unsupported)}. Remove them."
                                                if unsupported else ""))
@@ -355,6 +364,7 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
                 re.search(r"took part|alongside|participat|you joined|you were in|with you in|you invested", body, re.I):
             unsupported = ["that you took part (the announcement does not name you)"]
         if not unsupported:
+            blob_put(memo, {"subject": subject, "body": body, "dropped": dropped})
             return _finish(kind, subject, body, result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=dropped,
                            note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
                                 + (f" Its first draft was dropped: it added {', '.join(dropped[:4])}." if dropped else ""))
