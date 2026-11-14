@@ -243,11 +243,14 @@ export function WalkGraph({
         {model.softs.map((s) => {
           const on = !!lit && lit.softs.has(s.key)
           // Nothing in Cala's graph, yet rounds hang under it: the second pass found them in reports. Say that, not "no rounds".
-          const own = s.rounds ? [] : model.rounds.filter((r) => r.softs.includes(s.key))
+          const drawn = model.rounds.filter((r) => r.softs.includes(s.key))
+          const own = s.rounds ? [] : drawn
+          // Rounds the reports added sit under it too, so the count on the node says where the extra ones came from.
+          const extra = s.rounds ? drawn.filter((r) => r.via === 'knowledge').length : 0
           const sub = !s.read
             ? 'reading'
             : s.rounds
-              ? `${capped(s.rounds, s.capped)} rounds, led ${s.led ?? 0}`
+              ? `${capped(s.rounds, s.capped)} rounds in Cala, led ${s.led ?? 0}`
               : own.length && own.every((r) => r.via === 'knowledge')
                 ? `${plural(own.length, 'round')} from reports`
                 : 'no rounds in Cala'
@@ -263,6 +266,7 @@ export function WalkGraph({
             >
               <span className="gl__name truncate" title={s.name}>{s.name}</span>
               <span className="gl__sub num truncate">{sub}</span>
+              {extra > 0 && <span className="gl__sub num truncate">{extra} more from reports</span>}
             </div>
           )
         })}

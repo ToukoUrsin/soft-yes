@@ -433,7 +433,7 @@ export class ApiError extends Error {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const RETRY_MS = [400, 1200, 2500, 4000, 6000]
+const RETRY_MS = [300, 800, 1500, 2500, 4000, 6000, 8000, 10000]   // about half a minute before giving up
 export const OFFLINE = 'No connection to Soft Yes right now. Check your network and try again.'
 
 /** Every call is a read or repeats safely, so a dropped connection or a gateway hiccup is retried quietly. */

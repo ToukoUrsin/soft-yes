@@ -485,7 +485,7 @@ const TARGET_MS = 8200
 const SETTLE_MS = 950
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const RETRY_MS = [600, 1500, 3000, 5000, 7000]
+const RETRY_MS = [400, 1000, 2000, 3500, 5000, 7000, 9000, 12000]   // a line that flaps for half a minute is ridden out
 
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -661,7 +661,7 @@ class WalkStore {
     this.total = 0
     this.final = null
     const { inputs, generation, mode } = this.state
-    this.set({ ...initial, mode, inputs, generation, phase: 'walking', narration: 'Asking Cala again', detail: 'The connection dropped. Nothing is lost.' })
+    this.set({ ...initial, mode, inputs, generation, phase: 'walking', narration: 'Picking the walk up again', detail: 'The line dropped for a moment. Nothing is lost.' })
   }
 
   /** The first result is on screen and the stream is gone: the walk goes on at the server, so wait for what it stores. */
