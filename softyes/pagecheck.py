@@ -397,7 +397,8 @@ async def check_round(rd: dict) -> dict:
     srcs = pick_pages(rd)
     pages = await asyncio.gather(*(page(x["url"]) for x in srcs))
     out = {"id": rd["id"], "tried": len(srcs), "read": 0, "off_topic": 0, "leads": {}, "followers": {}, "mentions": {},
-           "named": [], "amount": None, "stages": [], "headline": [], "pages": [], "published": {}}
+           "named": [], "amount": None, "stages": [], "headline": [], "pages": [], "published": {}, "dated": {},
+           "page_stages": {}}
     for src, pg in zip(srcs, pages):
         text = pg["text"]
         if not text:
@@ -412,6 +413,9 @@ async def check_round(rd: dict) -> dict:
         if pg.get("published"):
             out["published"][src["url"]] = pg["published"]
         on_page = stages_on_page(text)
+        out["page_stages"][src["url"]] = on_page
+        if pg.get("published") or src.get("date"):
+            out["dated"][src["url"]] = (pg.get("published") or src["date"])[:10]
         for i in rd.get("investors", []):
             key = graph.norm(i["name"])
             # which round a sentence is about is settled across all the round's pages, by the caller

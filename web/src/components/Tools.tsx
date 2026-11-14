@@ -3,11 +3,11 @@ import {
   api, type AskAnswer, type Conflicts as ConflictsData, type ConflictCompany, type Draft, type DraftKind, type Lead,
   type References as ReferencesData, type Result, type Says, type SlushInfo,
 } from '../lib/api'
-import { capped, fmtEventTime, fmtMoney, fmtMonth, host, plural } from '../lib/format'
+import { capped, fmtEventTime, fmtMoney, fmtMonth, host, plural, possessive } from '../lib/format'
 import { useConfig, useFounder, useSessionState } from '../lib/store'
 import { Deal } from './Deal'
 import { Markdown } from './Markdown'
-import { CopyButton, Icon, Segmented, Sources, useCopy } from './ui'
+import { CopyButton, Icon, N, Segmented, Sources, useCopy } from './ui'
 
 interface Props { lead: Lead; result: Result }
 
@@ -148,7 +148,7 @@ function FounderFields({ result }: { result: Result }) {
   )
 }
 
-export function DraftPane({ lead, result, kind, fields = 'above' }: Props & { kind: DraftKind; fields?: 'above' | 'drafts' }) {
+export function DraftPane({ lead, result, kind }: Props & { kind: DraftKind }) {
   const [founder] = useFounder()
   const config = useConfig()
   const settled = useDebounced(founder, 700)
@@ -210,7 +210,11 @@ export function DraftPane({ lead, result, kind, fields = 'above' }: Props & { ki
   }
   const limit = kind === 'slush' ? 300 : null
   const over = limit != null && d.chars > limit
-  const blanks = /\[[^\]\n]{2,40}\]/.test(`${d.subject} ${d.body}`)
+  // What is still a blank in the text. Until the founder fills them in, there is nothing to copy.
+  const open = d.placeholders ?? Array.from(new Set(`${d.subject} ${d.body}`.match(/\[[^\]\n]{2,40}\]/g) ?? []))
+  const blanks = open.length > 0
+  const inSubject = open.some((b) => d.subject.includes(b))
+  const yours = d.yours ?? []
   return (
     <div className="draft">
       <div className="draft__paper" key={`${d.model ?? 'template'}:${d.body.length}`}>
@@ -218,10 +222,12 @@ export function DraftPane({ lead, result, kind, fields = 'above' }: Props & { ki
           <p className="draft__subject">
             <span className="faint">Subject</span>
             <span className="draft__subject-text"><WithBlanks text={d.subject} /></span>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => copySubject(d.subject)} aria-label="Copy the subject">
-              <Icon name={subjectCopied ? 'check' : 'copy'} size={13} />
-              {subjectCopied ? 'Copied' : 'Copy'}
-            </button>
+            {!inSubject && (
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => copySubject(d.subject)} aria-label="Copy the subject">
+                <Icon name={subjectCopied ? 'check' : 'copy'} size={13} />
+                {subjectCopied ? 'Copied' : 'Copy'}
+              </button>
+            )}
           </p>
         )}
         <div className="draft__body"><WithBlanks text={d.body} /></div>
@@ -245,26 +251,45 @@ export function DraftPane({ lead, result, kind, fields = 'above' }: Props & { ki
               {d.chars} / {limit}
             </span>
           )}
-          <CopyButton text={d.body} label={kind === 'slush' ? 'Copy note' : 'Copy message'} className="btn btn--primary" />
+          {blanks ? (
+            <span className="draft__fill">
+              Fill in {open.map((b, i) => (
+                <span key={b}>
+                  {i > 0 && (i === open.length - 1 ? ' and ' : ', ')}
+                  <mark className="blank">{b.slice(1, -1)}</mark>
+                </span>
+              ))} to copy
+            </span>
+          ) : (
+            <CopyButton text={d.body} label={kind === 'slush' ? 'Copy note' : 'Copy message'} className="btn btn--primary" />
+          )}
         </div>
       </div>
-      {blanks && (
-        <p className="draft__hint faint">
-          {fields === 'above' ? 'The marked blanks fill in from the three fields above.' : 'The marked blanks fill in from the three fields on the Drafts tab.'}
-        </p>
-      )}
       <div className="draft__facts">
         <h4>
-          The only facts it may use
-          <span className="count num">{d.facts.length}</span>
+          <Icon name="check" size={13} />
+          From Cala, checked<N>{d.facts.length}</N>
         </h4>
         <ol>
           {d.facts.map((f) => (
             <li key={f}>{f}</li>
           ))}
         </ol>
+        {yours.length > 0 && (
+          <>
+            <h4 className="draft__yours">
+              <i aria-hidden="true" />
+              Your own words, not checked<N>{yours.length}</N>
+            </h4>
+            <ol className="draft__yourslist">
+              {yours.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ol>
+          </>
+        )}
         <p className="faint">
-          Each one is from this walk of Cala. The model is handed these lines and nothing else; a draft that adds a name, number or date is thrown away.
+          The draft may use these lines and nothing else. One that adds a name, number or date is thrown away.
         </p>
       </div>
     </div>
@@ -312,7 +337,7 @@ function Did({ says, lead }: { says: Says; lead: Lead }) {
     <div className="says__col">
       <h4>What it did, in Cala</h4>
       {d.rounds == null ? (
-        <p className="muted">This walk did not read {lead.name}’s own record.</p>
+        <p className="muted">This walk did not read {possessive(lead.name)} own record.</p>
       ) : (
         <dl className="facts facts--stack">
           <div>
@@ -346,7 +371,7 @@ function Did({ says, lead }: { says: Says; lead: Lead }) {
         <>
           <h5>Most recent round it led</h5>
           <ul className="deals deals--tight">
-            <Deal round={d.last_led} sources={d.last_led.sources} />
+            <Deal round={d.last_led} sources={d.last_led.sources} check={d.last_led.check} who={lead.name} />
           </ul>
         </>
       )}
@@ -359,7 +384,7 @@ export function SaysDid({ lead, result }: Props) {
   if (od.status === 'idle') {
     return (
       <Start action="Read its website" onRun={od.run} time="5 to 40 seconds the first time">
-        Funds describe themselves one way and invest another. This reads {lead.name}’s own website and sets what it says about
+        Funds describe themselves one way and invest another. This reads {possessive(lead.name)} own website and sets what it says about
         leading, stage and cheque size next to what it did in Cala. Quotes are copied word for word and checked to be on the page.
       </Start>
     )
@@ -569,7 +594,7 @@ export function References({ lead, result }: Props) {
     return (
       <Start action="Find founders to call" onRun={od.run} time="A few seconds">
         Before you take a lead’s money, talk to founders it has already led. This looks up who founded or runs the companies
-        behind {lead.name}’s latest led rounds, each with the page that names them.
+        behind {possessive(lead.name)} latest led rounds, each with the page that names them.
       </Start>
     )
   }
@@ -655,8 +680,7 @@ export function Slush({ lead, result }: Props) {
       </div>
 
       <h4>
-        Side events it hosts or is named in
-        <span className="count num">{s.events.length}</span>
+        Side events it hosts or is named in<N>{s.events.length}</N>
       </h4>
       {s.events.length > 0 ? (
         <ul className="events">
@@ -687,11 +711,6 @@ export function Slush({ lead, result }: Props) {
         </p>
       )}
 
-      <h4>A note for the Slush meeting tool</h4>
-      <p className="muted slush__why">
-        {s.meeting_tool.note_limit} characters and a {s.meeting_tool.slot_minutes}-minute slot is all you get, so the note leads with the shared deal.
-      </p>
-      <DraftPane lead={lead} result={result} kind="slush" fields="drafts" />
     </div>
   )
 }
@@ -733,7 +752,10 @@ export function AskCala({ lead, result }: Props) {
         <ul className="ask__ideas">
           {suggestions.filter((s) => s !== asked).map((s) => (
             <li key={s}>
-              <button type="button" onClick={() => ask(s)}>{s}</button>
+              <button type="button" onClick={() => ask(s)}>
+                <span>{s}</span>
+                <Icon name="arrow" size={14} />
+              </button>
             </li>
           ))}
         </ul>

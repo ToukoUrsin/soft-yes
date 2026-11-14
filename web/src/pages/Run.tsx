@@ -4,11 +4,12 @@ import { api, type ApiError, type Result } from '../lib/api'
 import { download, proofLine, toCsv, toMarkdown } from '../lib/export'
 import { fmtDate, listOr, plural } from '../lib/format'
 import { rememberRun, useConfig, useMedia } from '../lib/store'
-import { useWalk, walkStore, type WalkState } from '../lib/walk'
+import { pagesLine, useWalk, walkStore, type WalkState } from '../lib/walk'
+import { AmountFix, ClaimStrip, LeadFix, StageFix } from '../components/Evidence'
 import { LeadDetail, LeadList, type Tab } from '../components/Leads'
 import { Verdicts } from '../components/Verdicts'
 import { WalkGraph } from '../components/WalkGraph'
-import { CopyButton, Count, Icon, Mark, NamesProvider, useCopy } from '../components/ui'
+import { CopyButton, Count, Icon, Mark, N, NamesProvider, useCopy } from '../components/ui'
 
 const permalink = (runId: string) => `${location.origin}/r/${runId}`
 
@@ -60,23 +61,33 @@ function ExportMenu({ result }: { result: Result }) {
   )
 }
 
-/** The page's one headline slot: it narrates the walk, then states the result. Same box, no jump. */
+/** The page's one headline slot: it narrates the walk, then states the result, or says why it stopped. Same box, no jump. */
 function Headline({ walk }: { walk: WalkState }) {
   const walking = walk.phase === 'walking'
+  const stopped = walk.phase === 'error'
   let title = walk.narration
   let sub = walk.detail
-  if (!walking && walk.result) {
+  if (stopped) {
+    title = 'The walk stopped'
+    sub = walk.error ?? ''
+  } else if (!walking && walk.result) {
     const cut = walk.result.headline.indexOf('. ')
     title = cut > 0 ? walk.result.headline.slice(0, cut + 1) : walk.result.headline
     sub = cut > 0 ? walk.result.headline.slice(cut + 2) : ''
   }
   return (
-    <div className={`run__headline${walking ? ' is-walking' : ''}`} aria-live="polite" aria-atomic="true">
+    <div
+      className={`run__headline${walking ? ' is-walking' : ''}${stopped ? ' is-stopped' : ''}`}
+      role={stopped ? 'alert' : undefined}
+      aria-live={stopped ? undefined : 'polite'}
+      aria-atomic="true"
+    >
       <h1>
         {walking && <i className="run__live" aria-hidden="true" />}
+        {stopped && <i className="run__live run__live--stopped" aria-hidden="true" />}
         {title}
       </h1>
-      <p className="run__sub truncate" title={walking ? undefined : sub}>{sub}</p>
+      <p className={`run__sub${stopped ? '' : ' truncate'}`} title={walking || stopped ? undefined : sub}>{sub}</p>
     </div>
   )
 }
@@ -97,11 +108,105 @@ function Tally({ walk }: { walk: WalkState }) {
         <dd className="num"><Count value={c.sources} /></dd>
         <dt>sources</dt>
       </div>
+      {walk.pages && walk.pages.pages > 0 && (
+        <div>
+          <dd className="num"><Count value={walk.pages.pages} /></dd>
+          <dt>pages read</dt>
+        </div>
+      )}
       <div className="tally__zero">
         <dd className="num">0</dd>
         <dt>from a language model</dt>
       </div>
     </dl>
+  )
+}
+
+/**
+ * The page check as a step of the walk. While the pages are being read it shows one mark per round; when they are
+ * read, one mark per lead claim. Once the walk is done the line opens what the pages changed in this run.
+ */
+function PageStep({ walk, result }: { walk: WalkState; result: Result | null }) {
+  const [open, setOpen] = useState(false)
+  const p = walk.pages
+  const walking = walk.phase === 'walking'
+  const pc = !walking ? result?.page_check : null
+  const findings = pc?.findings ?? []
+  const leads = findings.filter((f) => f.kind === 'lead')
+  const amounts = findings.filter((f) => f.kind === 'amount')
+  const stages = findings.filter((f) => f.kind === 'stage')
+  useEffect(() => setOpen(false), [walk.generation])
+  if (!p && !walking) return null
+
+  const reading = !p || p.state === 'reading'
+  const sentence = p && p.state === 'done' && (
+    <>
+      <b className="num">{p.pages}</b> pages read. <b className="num">{p.confirmed}</b> lead {p.confirmed === 1 ? 'claim' : 'claims'} confirmed word for word
+      {p.corrected > 0 && <>, <b className="num pagestep__fix">{p.corrected}</b> corrected</>}
+      {p.unstated > 0 && <>, <b className="num">{p.unstated}</b> the page does not say</>}.
+    </>
+  )
+  return (
+    <section className={`pagestep${reading ? ' is-reading' : ''}${!p ? ' is-waiting' : ''}`} aria-label="The page check">
+      <div className="pagestep__line">
+        <span className="pagestep__name">
+          <Icon name="page" size={14} />
+          Page check
+        </span>
+        {!p ? (
+          <p className="pagestep__text faint">Next: open the pages Cala cites and find the sentence that says who led.</p>
+        ) : p.state === 'reading' ? (
+          <>
+            <ClaimStrip confirmed={0} corrected={0} open={0} reading={Math.max(p.rounds, 6)} max={36} />
+            <p className="pagestep__text" role="status">
+              Reading the pages behind {plural(p.rounds, 'round')}
+              <span className="faint"> for the sentence that says who led</span>
+            </p>
+          </>
+        ) : (
+          <>
+            <ClaimStrip confirmed={p.confirmed} corrected={p.corrected} open={p.unstated} max={36} />
+            {pc && findings.length > 0 ? (
+              <button type="button" className="pagestep__text pagestep__sum" aria-expanded={open} aria-controls="pagestep-panel" onClick={() => setOpen((o) => !o)}
+                title="See what the pages changed in this walk">
+                <span>{sentence}</span>
+                <Icon name="chevron" size={13} />
+              </button>
+            ) : (
+              <p className="pagestep__text" role="status">{sentence}</p>
+            )}
+          </>
+        )}
+        {pc && <Link className="link pagestep__all" href="/audit">Every check</Link>}
+      </div>
+      {open && pc && (
+        <div className="pagestep__panel" id="pagestep-panel">
+          {leads.length > 0 && (
+            <>
+              <h3>Another lead on the page<N>{leads.length}</N></h3>
+              <ul className="finds">{leads.map((f) => f.kind === 'lead' && <LeadFix key={`${f.round}:${f.cala}`} row={f} />)}</ul>
+            </>
+          )}
+          {amounts.length > 0 && (
+            <>
+              <h3>Amounts set aside<N>{amounts.length}</N></h3>
+              <ul className="finds finds--rows">{amounts.map((f) => f.kind === 'amount' && <AmountFix key={f.round} row={f} />)}</ul>
+            </>
+          )}
+          {stages.length > 0 && (
+            <>
+              <h3>Stage labels<N>{stages.length}</N></h3>
+              <ul className="finds finds--rows">{stages.map((f) => f.kind === 'stage' && <StageFix key={f.round} row={f} />)}</ul>
+            </>
+          )}
+          <p className="faint pagestep__tail">
+            {pc.unread > 0 ? `${plural(pc.unread, 'claim')} could not be checked: the page did not open or is about something else. ` : ''}
+            Each confirmed claim shows its sentence under the round, further down.{' '}
+            <Link className="link" href="/audit">See every check across all walks</Link>
+          </p>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -132,7 +237,7 @@ export function Run() {
   const wide = useMedia('(min-width: 961px)')
   const [load, setLoad] = useState<{ status: 'idle' | 'loading' | 'missing' | 'error'; error?: string }>({ status: 'idle' })
   const [attempt, retry] = useReducer((n: number) => n + 1, 0)
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>('record')
   const leadsRef = useRef<HTMLElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
 
@@ -168,6 +273,7 @@ export function Run() {
   const result = mine ? walk.result : null
   const done = mine && walk.phase === 'done' && !!result
   const walking = mine && walk.phase === 'walking'
+  const stopped = mine && walk.phase === 'error'
 
   useEffect(() => {
     if (done && result) rememberRun(result)
@@ -279,6 +385,7 @@ export function Run() {
   const companyName = result?.input.company?.name ?? inputs?.company?.name ?? null
   const softNames = (inputs?.soft_yeses ?? []).map((s) => s.name)
   const attending = result?.slush?.connected ? result.slush.leads_attending : 0
+  const usual = result && !result.input.stage ? result.input.stage_usual : null
 
   const replay = () => {
     if (!result) return
@@ -288,7 +395,17 @@ export function Run() {
 
   const onGraphSelect = (key: string) => {
     select(key)
-    if (wide) requestAnimationFrame(() => leadsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    if (!wide) return
+    requestAnimationFrame(() => {
+      // The list scrolls on its own. Put the picked row a third of the way down it first, so it is there when the page arrives.
+      const list = leadsRef.current?.querySelector<HTMLElement>('.leads')
+      const row = list?.querySelector<HTMLElement>(`.lead-row[data-lead="${CSS.escape(key)}"]`)
+      if (list && row) {
+        const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+        list.scrollTop = Math.max(0, top - list.clientHeight / 3)
+      }
+      leadsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
 
   const onRowSelect = (key: string, byKeyboard: boolean) => {
@@ -307,6 +424,13 @@ export function Run() {
                 Skip to the shortlist
                 <Icon name="skip" size={14} />
               </button>
+            ) : stopped ? (
+              <>
+                {inputs && (
+                  <button type="button" className="btn btn--primary" onClick={() => walkStore.start(inputs)}>Try again</button>
+                )}
+                <Link className="btn" href="/">Change the investors</Link>
+              </>
             ) : done && result ? (
               <>
                 <button type="button" className="btn btn--ghost" onClick={replay}>
@@ -331,14 +455,14 @@ export function Run() {
             {stageName && <span className="tag">{stageName}</span>}
             {companyName && <span className="faint truncate">for {companyName}</span>}
           </p>
-          <Tally walk={walk} />
+          {!(stopped && walk.counters.calls === 0) && <Tally walk={walk} />}
         </div>
 
-        {walk.deep && (
+        {walk.deep && !stopped && (
           <p className="deepline" role="status">
             <i className="spinner" aria-hidden="true" />
             <span>
-              <b>Still reading.</b> {walk.deep.line}. {done ? 'The shortlist below updates when it is done, usually within a minute.' : ''}
+              <b>Still reading.</b> {walk.deep.line}.{done ? ' The shortlist below updates when it is done, usually within a minute.' : ''}
             </span>
           </p>
         )}
@@ -350,18 +474,9 @@ export function Run() {
           </p>
         ))}
 
-        {walk.phase === 'error' ? (
-          <div className="state state--error" role="alert">
-            <strong>The walk stopped.</strong>
-            <span>{walk.error}</span>
-            <div className="state__row">
-              {inputs && (
-                <button type="button" className="btn" onClick={() => walkStore.start(inputs)}>Try again</button>
-              )}
-              <Link className="btn btn--ghost" href="/">Change the investors</Link>
-            </div>
-          </div>
-        ) : (
+        {!stopped && <PageStep walk={walk} result={result} />}
+
+        {!stopped && (
           <section className="run__graph" aria-label="The walk through Cala's funding graph">
             <WalkGraph model={walk.model} live={walking} selected={done ? selectedKey : null} onSelect={done ? onGraphSelect : undefined} />
           </section>
@@ -381,12 +496,12 @@ export function Run() {
               <section className="run__sec run__leads" ref={leadsRef} aria-label="Likely leads">
                 <div className="run__sechead">
                   <h2>
-                    Who could lead{' '}
-                    <span className="count num">{result.leads.length}</span>
+                    Who could lead<N>{result.leads.length}</N>
                   </h2>
                   <p>
                     Ranked by the rounds they led with {listOr(softNames)}, and by whether they still lead.
                     {attending > 0 ? ` ${attending} of them ${attending === 1 ? 'is' : 'are'} registered for Slush.` : ''}
+                    {usual ? ` No stage given: ${usual.rounds} of the ${usual.of} staged rounds are ${usual.stage_name}, so ${usual.stage_name} leads rank higher.` : ''}
                     {wide && (
                       <span className="run__keys">
                         <kbd className="kbd">J</kbd>
@@ -431,7 +546,14 @@ export function Run() {
                 <span className="num">{proofLine(result)}.</span>
               </p>
               <p className="faint">
-                Every fact on this page comes from Cala and links to the page Cala found it on. Walked{' '}
+                Every fact on this page comes from Cala and links to the page Cala found it on.
+                {result.page_check ? (
+                  <>
+                    {' '}Each lead claim was read again on that page: {pagesLine(result.page_check)}.{' '}
+                    <Link className="link" href="/audit">See the page check</Link>.
+                  </>
+                ) : null}{' '}
+                Walked{' '}
                 {fmtDate(new Date(result.created * 1000).toISOString().slice(0, 10))}
                 {result.ledger.fresh > 0
                   ? `, ${plural(result.ledger.fresh, 'fresh call')} and ${result.ledger.cached} from cache.`

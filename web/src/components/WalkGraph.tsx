@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { dims, layout, link, rowCount } from '../lib/graphLayout'
+import { dims, layout, link, rail, rowCount } from '../lib/graphLayout'
 import { capped, fmtMoney, fmtMonth, plural } from '../lib/format'
 import type { GraphModel, GLead } from '../lib/walk'
 
@@ -8,11 +8,15 @@ type Focus = { type: 'soft' | 'round' | 'lead'; id: string } | null
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
 /** Glide nodes to a new layout. Nodes that are new simply appear in place. */
-function useTweenedY(target: Record<string, number>): Record<string, number> {
+function useTweenedY(target: Record<string, number>, frame: unknown): Record<string, number> {
   const [ys, setYs] = useState(target)
   const cur = useRef(target)
+  const lastFrame = useRef(frame)
   useEffect(() => {
     const from = cur.current
+    // A new width is a new drawing, not a move: the first measure and a rotated phone snap into place.
+    const resized = lastFrame.current !== frame
+    lastFrame.current = frame
     let moves = false
     for (const k in target) {
       if (from[k] != null && Math.abs(from[k] - target[k]) > 0.5) {
@@ -20,7 +24,7 @@ function useTweenedY(target: Record<string, number>): Record<string, number> {
         break
       }
     }
-    if (!moves || reduceMotion()) {
+    if (!moves || resized || reduceMotion()) {
       cur.current = target
       setYs(target)
       return
@@ -39,13 +43,15 @@ function useTweenedY(target: Record<string, number>): Record<string, number> {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target])
   return ys
 }
 
-function leadRadius(l: GLead, compact: boolean): number {
+function leadRadius(l: GLead, compact: boolean, rowH: number): number {
   const n = Math.min(l.rounds.length, 5)
-  return (compact ? 3 : 3.75) + n * (compact ? 0.75 : 1.1)
+  // never taller than its row, so two busy leads on neighbouring rows do not touch
+  return Math.min((compact ? 3 : 3.75) + n * (compact ? 0.75 : 1.1), (rowH - 3) / 2)
 }
 
 export function WalkGraph({
@@ -60,20 +66,36 @@ export function WalkGraph({
   const wrap = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [focus, setFocus] = useState<Focus>(null)
+  const legend = useRef<HTMLParagraphElement>(null)
+  /** how tall the rows may be for the whole walk to show without scrolling */
+  const [room, setRoom] = useState(0)
 
   useLayoutEffect(() => {
     const el = wrap.current
     if (!el) return
-    setWidth(el.clientWidth)
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    const measure = () => {
+      setWidth(el.clientWidth)
+      const top = el.getBoundingClientRect().top + window.scrollY
+      const below = legend.current ? legend.current.offsetHeight + 12 : 38
+      const h = Math.round(window.innerHeight - top - 33 - below - 12)
+      setRoom((was) => (Math.abs(was - h) > 2 ? h : was))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
+    ro.observe(document.body)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
   }, [])
 
   const rows = rowCount(model)
-  const d = useMemo(() => dims(width || 1136, rows), [width, rows])
+  const groups = model.softs.length
+  const d = useMemo(() => dims(width || 1136, rows, { height: room, groups }), [width, rows, room, groups])
   const target = useMemo(() => layout(model, d), [model, d])
-  const tween = useTweenedY(target.y)
+  const tween = useTweenedY(target.y, d.width)
   const y = (id: string) => tween[id] ?? target.y[id] ?? 0
 
   const roundById = useMemo(() => new Map(model.rounds.map((r) => [r.id, r])), [model.rounds])
@@ -116,17 +138,23 @@ export function WalkGraph({
   const compact = d.density === 'compact'
   const softR = compact ? 4.5 : 5.5
 
+  // On a phone a round sits under one soft yes and hangs from its rail alone; a second soft yes is told by the port.
   const softEdges = model.rounds.flatMap((r) =>
-    r.softs.map((s) => {
+    (d.stacked ? r.softs.slice(0, 1) : r.softs).map((s) => {
       const on = !!lit && lit.softs.has(s) && lit.rounds.has(r.id)
-      return { key: `${s}:${r.id}`, d: link(d.softX + softR + 2, y(`s:${s}`), d.r1 - 3, y(`r:${r.id}`)), on }
+      const sy = y(`s:${s}`)
+      const ry = y(`r:${r.id}`)
+      const path = d.stacked
+        ? rail(d.softX, sy + (ry >= sy ? 1 : -1) * (softR + 2), d.r1 - 3, ry)
+        : link(d.softX + softR + 2, sy, d.r1 - 3, ry)
+      return { key: `${s}:${r.id}`, d: path, on }
     }),
   )
   const leadEdges = model.rounds.flatMap((r) =>
     r.leads.map((k) => {
       const l = model.leads.find((x) => x.key === k)
       const on = !!lit && lit.rounds.has(r.id) && lit.leads.has(k) && (lit.lead ? lit.lead === k : true)
-      return { key: `${r.id}:${k}`, d: link(d.r2 + 3, y(`r:${r.id}`), d.leadX - (l ? leadRadius(l, compact) : 4) - 3, y(`l:${k}`)), on }
+      return { key: `${r.id}:${k}`, d: link(d.r2 + 3, y(`r:${r.id}`), d.leadX - (l ? leadRadius(l, compact, d.rowH) : 4) - 3, y(`l:${k}`)), on }
     }),
   )
   // Lit edges paint last so they sit on top.
@@ -136,22 +164,22 @@ export function WalkGraph({
   const leadCount = model.leads.length
   const roundCount = model.rounds.length
   const heads = compact
-    ? ['Said yes', 'Followed in', 'Led by']
+    ? ['Said yes', 'Rounds they followed', 'Led by']
     : ['Said yes', 'Rounds they joined without leading', 'Who led them']
 
   return (
     <div
       ref={wrap}
-      className={`graph graph--${d.density}${live ? ' graph--live' : ''}${model.settled ? ' graph--settled' : ''}`}
+      className={`graph graph--${d.density}${d.rowH < 22 && !d.stacked ? ' graph--tight' : ''}${live ? ' graph--live' : ''}${model.settled ? ' graph--settled' : ''}`}
       onMouseLeave={() => setFocus(null)}
     >
       <div className="graph__heads" aria-hidden="true">
-        <span style={{ left: 0, width: d.softX + softR, textAlign: 'right' }}>{heads[0]}</span>
-        <span style={{ left: d.roundLabelX }}>
+        {!d.stacked && <span style={{ left: 0, width: d.softX + softR, textAlign: 'right' }}>{heads[0]}</span>}
+        <span style={{ left: d.stacked ? 0 : d.roundLabelX }}>
           {heads[1]}
           {roundCount > 0 && <b className="num">{roundCount}</b>}
         </span>
-        <span style={{ left: d.leadLabelX - (compact ? 0 : 0) }}>
+        <span style={{ left: d.leadLabelX }}>
           {heads[2]}
           {leadCount > 0 && <b className="num">{leadCount}</b>}
         </span>
@@ -176,6 +204,7 @@ export function WalkGraph({
               return (
                 <g key={r.id} className={`gport${r.leads.length ? '' : ' is-none'}${dimmed(on)}`}>
                   <circle cx={d.r1} cy={cy} r={1.75} className="gport__in" />
+                  {d.stacked && r.softs.length > 1 && <circle cx={d.r1} cy={cy} r={4} className="gport__also" />}
                   {r.leads.length > 0 && <circle cx={d.r2} cy={cy} r={1.75} className="gport__out" />}
                 </g>
               )
@@ -199,7 +228,7 @@ export function WalkGraph({
             {model.leads.map((l) => {
               const on = !!lit && lit.leads.has(l.key)
               const cy = y(`l:${l.key}`)
-              const r = leadRadius(l, compact)
+              const r = leadRadius(l, compact, d.rowH)
               return (
                 <g key={l.key} className={`glead${l.pulse && l.pulse.rounds > 0 ? ' is-read' : ''}${dimmed(on)}`}>
                   {selected === l.key && model.settled && <circle cx={d.leadX} cy={cy} r={r + 3.5} className="glead__sel" />}
@@ -213,16 +242,27 @@ export function WalkGraph({
 
         {model.softs.map((s) => {
           const on = !!lit && lit.softs.has(s.key)
-          const sub = !s.read ? 'reading' : s.rounds ? `${capped(s.rounds, s.capped)} rounds, led ${s.led ?? 0}` : 'no rounds in Cala'
+          // Nothing in Cala's graph, yet rounds hang under it: the second pass found them in reports. Say that, not "no rounds".
+          const own = s.rounds ? [] : model.rounds.filter((r) => r.softs.includes(s.key))
+          const sub = !s.read
+            ? 'reading'
+            : s.rounds
+              ? `${capped(s.rounds, s.capped)} rounds, led ${s.led ?? 0}`
+              : own.length && own.every((r) => r.via === 'knowledge')
+                ? `${plural(own.length, 'round')} from reports`
+                : 'no rounds in Cala'
+          // A phone heading may run across the lead column when no lead sits on its row.
+          const sy = target.y[`s:${s.key}`] ?? 0
+          const clear = d.stacked && !model.leads.some((l) => Math.abs((target.y[`l:${l.key}`] ?? -99) - sy) < (d.headH + d.rowH) / 2)
           return (
             <div
               key={s.key}
               className={`gl gl--soft${dimmed(on)}`}
-              style={{ width: d.softLabelW, transform: `translate(0px, ${y(`s:${s.key}`)}px) translateY(-50%)` }}
+              style={{ width: clear ? d.width - d.softLabelX : d.softLabelW, transform: `translate(${d.softLabelX}px, ${y(`s:${s.key}`)}px) translateY(-50%)` }}
               onMouseEnter={() => setFocus({ type: 'soft', id: s.key })}
             >
               <span className="gl__name truncate" title={s.name}>{s.name}</span>
-              {!compact && <span className="gl__sub num truncate">{sub}</span>}
+              <span className="gl__sub num truncate">{sub}</span>
             </div>
           )
         })}
@@ -236,7 +276,9 @@ export function WalkGraph({
           const when = fmtMonth(b.date)
           const none = r.leads.length === 0
           const mark = r.via === 'knowledge' ? 'report' : r.relation === 'cap_table' ? 'backs it' : ''
+          const also = r.softs.slice(1).map((k) => model.softs.find((x) => x.key === k)?.name).filter(Boolean)
           const title = [name, stage, money, when].filter(Boolean).join(', ') + (none ? '. No outside lead in Cala.' : '') +
+            (also.length ? ` Also joined by ${also.join(' and ')}.` : '') +
             (r.via === 'knowledge' ? ' Found in a report by Cala’s knowledge search.' : r.relation === 'cap_table' ? ' The investor backs this company; Cala does not list it in this round.' : '')
           return (
             <div
@@ -247,6 +289,7 @@ export function WalkGraph({
               onMouseEnter={() => setFocus({ type: 'round', id: r.id })}
             >
               <span className="gl__co truncate">{name}</span>
+              {d.stacked && also.length > 0 && <span className="sr-only">, also joined by {also.join(' and ')}</span>}
               {!compact && <span className={`gl__stage truncate${!stage && mark ? ' gl__stage--via' : ''}`}>{stage || mark}</span>}
               {!compact && <span className="gl__amt num">{money}</span>}
               {d.density === 'full' && <span className="gl__when num">{when}</span>}
@@ -272,7 +315,7 @@ export function WalkGraph({
               type="button"
               className={`gl gl--lead${selected === l.key && model.settled ? ' is-selected' : ''}${l.pulse && !bare ? ' is-read' : ''}${dimmed(on)}`}
               style={{
-                width: d.leadLabelW + 8, height: d.rowH - 4,
+                width: d.leadLabelW + 6, height: d.rowH - 4,
                 transform: `translate(${d.leadLabelX - 6}px, ${y(`l:${l.key}`) - (d.rowH - 4) / 2}px)`,
               }}
               title={title}
@@ -292,13 +335,14 @@ export function WalkGraph({
         })}
       </div>
 
-      <p className="graph__legend">
-        <span><i className="lg lg--soft" />said yes, wants a lead</span>
-        <span><i className="lg lg--lead" />led a round they joined, own record read</span>
-        <span><i className="lg lg--unread" />led a round, own record not read</span>
+      {model.softs.length > 0 && <p className="graph__legend" ref={legend}>
+        <span><i className="lg lg--soft" />{compact ? 'said yes' : 'said yes, wants a lead'}</span>
+        <span><i className="lg lg--lead" />{compact ? 'led, record read' : 'led a round they joined, own record read'}</span>
+        <span><i className="lg lg--unread" />{compact ? 'led, not read' : 'led a round, own record not read'}</span>
+        {d.stacked && model.rounds.some((r) => r.softs.length > 1) && <span><i className="lg lg--also" />joined by two of them</span>}
         {model.rounds.some((r) => !r.leads.length) && <span className="graph__legend-dim">Dimmed rounds have no outside lead in Cala</span>}
         {model.rounds.some((r) => r.via === 'knowledge') && <span className="graph__legend-dim">“report”: found by Cala’s knowledge search in the page cited</span>}
-      </p>
+      </p>}
     </div>
   )
 }

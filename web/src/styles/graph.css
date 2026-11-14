@@ -82,6 +82,13 @@
   fill: var(--line-2);
 }
 
+/* phone: a round a second soft yes also joined */
+.gport__also {
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 1;
+}
+
 .gport,
 .gsoft,
 .glead {
@@ -301,6 +308,13 @@
   border: 1.5px solid var(--accent);
 }
 
+.lg--also {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--text-3);
+  background: radial-gradient(circle, var(--text-3) 0 1.75px, transparent 2px);
+}
+
 /* Density */
 
 .graph--mid .gl--round .gl__stage {
@@ -311,8 +325,49 @@
   font-size: var(--fs-xs);
 }
 
+.graph--compact .gl--soft {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0 8px;
+  height: 18px;
+  text-align: left;
+  line-height: 18px;
+}
+
+/* one line: the name gives way, the round count always shows */
 .graph--compact .gl--soft .gl__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--fs-s);
+}
+
+.graph--compact .gl--soft .gl__sub {
+  flex: none;
+  max-width: none;
+}
+
+/* Rows shrunk so the whole walk fits the screen. */
+
+.graph--tight .gl {
   font-size: var(--fs-xs);
+}
+
+.graph--tight .gl--soft .gl__name {
+  font-size: var(--fs-s);
+}
+
+.graph--tight .gl--lead {
+  border-radius: 3px;
+}
+
+.graph--compact .graph__legend {
+  gap: 6px 14px;
+}
+
+.graph--compact .graph__legend-dim {
+  flex-basis: 100%;
 }
 
 .graph--compact .gl--lead {

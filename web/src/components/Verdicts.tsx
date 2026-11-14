@@ -1,6 +1,7 @@
 import type { SoftYes, Verdict } from '../lib/api'
 import { Deal } from './Deal'
-import { Investor } from './ui'
+import { plural } from '../lib/format'
+import { Icon, Investor } from './ui'
 import { YearBars } from './YearBars'
 
 const TAG: Record<Verdict, { text: string; cls: string }> = {
@@ -18,13 +19,21 @@ export function Verdicts({ softs }: { softs: SoftYes[] }) {
       {softs.map((s) => {
         const tag = TAG[s.verdict] ?? TAG.unknown
         const lastLed = s.led_rounds?.[0]
+        const fixed = s.led_corrected ?? []
         return (
           <article key={s.key} className="verdict">
             <header className="verdict__head">
               <h3 className="truncate"><Investor name={s.name} ids={s.ids} /></h3>
               <span className={tag.cls}>{tag.text}</span>
             </header>
-            <p className="verdict__insight">{s.insight}</p>
+            {s.doubt ? (
+              <p className="notice verdict__doubt">
+                <Icon name="alert" size={14} />
+                {s.doubt.text}
+              </p>
+            ) : (
+              <p className="verdict__insight">{s.insight}</p>
+            )}
             {s.pulse?.by_year?.length ? (
               <div className="verdict__chart">
                 <YearBars data={s.pulse.by_year} variant="card" label={`${s.name}, rounds per year`} />
@@ -38,9 +47,25 @@ export function Verdicts({ softs }: { softs: SoftYes[] }) {
               <div className="verdict__block">
                 <h4>Last round it led</h4>
                 <ul className="deals deals--tight">
-                  <Deal round={lastLed} sources={lastLed.sources} />
+                  <Deal round={lastLed} sources={lastLed.sources} check={lastLed.check} who={s.name} stagePage={lastLed.stage_page} />
                 </ul>
               </div>
+            )}
+            {fixed.length > 0 && (
+              <div className="verdict__block">
+                <h4>Cala says it led {fixed.length === 1 ? 'this' : `these ${fixed.length}`}. The page names another lead</h4>
+                <ul className="deals deals--tight">
+                  {fixed.slice(0, 2).map((r) => (
+                    <Deal key={r.id} round={r} sources={r.sources} check={r.check} who={s.name} />
+                  ))}
+                </ul>
+                {fixed.length > 2 && <p className="faint">And {plural(fixed.length - 2, 'more round')}, counted as followed.</p>}
+              </div>
+            )}
+            {!!s.reports && (
+              <p className="faint verdict__reports">
+                {plural(s.reports, 'round')} here {s.reports === 1 ? 'comes' : 'come'} from reports Cala read, not from its graph.
+              </p>
             )}
             {s.usual_leads?.length > 0 && (
               <div className="verdict__block">

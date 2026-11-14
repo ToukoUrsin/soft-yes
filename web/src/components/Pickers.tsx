@@ -85,6 +85,8 @@ interface ListProps {
 function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys, emptyHint }: ListProps) {
   const q = query.trim()
   const fresh = state.for === q
+  // Enter on its own takes the top row only when Cala is sure it is the name typed.
+  const sure = active < 0 && !!state.items[0]?.sure && !disabledKeys?.has(state.items[0].key)
   const listRef = useRef<HTMLUListElement>(null)
   useEffect(() => {
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
@@ -96,31 +98,36 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
         <p className="pop__msg pop__msg--error">{state.error}</p>
       ) : state.items.length ? (
         <ul className="pop__list" role="listbox" id={id} ref={listRef}>
-          {state.items.map((s, i) => {
+          {state.items.flatMap((s, i) => {
             const off = disabledKeys?.has(s.key)
-            return (
+            // Names Cala offers for a misspelling sit under one quiet label; each row still says what it is.
+            const label = s.did_you_mean && !state.items[i - 1]?.did_you_mean
+              ? [<li key="closest" role="presentation" className="pop__group">{i === 0 ? 'No exact match. Closest names in Cala' : 'Closest names in Cala'}</li>]
+              : []
+            return [
+              ...label,
               <li
                 key={s.key}
                 id={`${id}-${i}`}
                 role="option"
-                aria-selected={i === Math.max(active, 0)}
+                aria-selected={active >= 0 ? i === active : sure && i === 0}
                 aria-disabled={off || undefined}
                 aria-label={optionLabel(s, off)}
-                className={`opt${active < 0 && i === 0 ? ' opt--top' : ''}`}
+                className={`opt${sure && i === 0 ? ' opt--top' : ''}`}
                 onMouseMove={() => i !== active && setActive(i)}
                 onClick={() => !off && onPick(s)}
               >
                 <span className="opt__main">
                   <span className="opt__name truncate"><Highlight text={s.name} q={q} /></span>
-                  <span className="opt__type">{s.did_you_mean ? 'Closest name in Cala' : typeLabel(s)}</span>
+                  <span className="opt__type">{typeLabel(s)}</span>
                 </span>
                 <span className={`opt__side num${!off && !s.known_rounds ? ' opt__side--none' : ''}`}>
                   {off ? 'Added' : roundsLabel(s)}
-                  {active < 0 && i === 0 && !off && <kbd className="kbd opt__enter">Enter</kbd>}
+                  {sure && i === 0 && <kbd className="kbd opt__enter">Enter</kbd>}
                 </span>
                 {s.description && <span className="opt__desc truncate">{s.description}</span>}
-              </li>
-            )
+              </li>,
+            ]
           })}
         </ul>
       ) : fresh && !state.loading ? (
@@ -134,7 +141,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
       )}
       {state.items.length > 0 && (
         <p className="pop__foot">
-          <span>{state.source === 'cala' ? 'Searched Cala' : 'From what Cala has already returned'}</span>
+          <span>{active < 0 && !sure && fresh ? 'More than one could be it. Pick one.' : state.source === 'cala' ? 'Searched Cala' : 'From what Cala has already returned'}</span>
           <span className="pop__keys"><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> move <kbd className="kbd">Enter</kbd> add</span>
         </p>
       )}
@@ -143,8 +150,9 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
 }
 
 /**
- * Nothing is chosen until an arrow key is pressed: the first Down lands on the first row, and Enter on its own takes
- * the first row too. So "type, Down, Enter" and "type, Enter" both give the top match, never the second.
+ * Nothing is chosen until an arrow key is pressed: the first Down lands on the first row. Enter on its own takes the
+ * first row when Cala is sure it is the name typed; when it is not, Enter only moves onto that row, and a second
+ * Enter takes it. A guess is never added unseen.
  */
 function useListNav(count: number, open: boolean, key: string) {
   const [active, setActive] = useState(-1)
@@ -162,7 +170,13 @@ function useListNav(count: number, open: boolean, key: string) {
  * Enter pressed while the list still answers an older query ("EI" on screen, "EIC" typed) must not take a row from
  * the old list. It waits for the answer to what is typed and takes the top match then.
  */
-function useEnter(state: SuggestState, q: string, active: number, pick: (s: Suggestion) => void) {
+function useEnter(state: SuggestState, q: string, active: number, setActive: (i: number) => void, pick: (s: Suggestion) => void) {
+  const top = () => {
+    const first = state.items[0]
+    if (!first) return
+    if (first.sure) pick(first)
+    else setActive(0)
+  }
   const [waiting, setWaiting] = useState(false)
   const fresh = state.for === q.trim() && !state.loading
   useEffect(() => {
@@ -170,14 +184,15 @@ function useEnter(state: SuggestState, q: string, active: number, pick: (s: Sugg
     if (!q.trim()) setWaiting(false)
     else if (fresh) {
       setWaiting(false)
-      if (state.items[0]) pick(state.items[0])
+      top()
     }
     // pick is recreated every render; only the answer arriving matters here
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waiting, fresh, q])
   return () => {
     if (!fresh) setWaiting(true)
-    else if (state.items[Math.max(active, 0)]) pick(state.items[Math.max(active, 0)])
+    else if (active >= 0 && state.items[active]) pick(state.items[active])
+    else top()
   }
 }
 
@@ -212,7 +227,7 @@ export function TokenField({
     setQ('')
     input.current?.focus()
   }
-  const enter = useEnter(state, q, active, add)
+  const enter = useEnter(state, q, active, setActive, add)
 
   return (
     <div className="picker">
@@ -242,7 +257,7 @@ export function TokenField({
           aria-expanded={open}
           aria-controls={id}
           aria-autocomplete="list"
-          aria-activedescendant={open && state.items.length ? `${id}-${Math.max(active, 0)}` : undefined}
+          aria-activedescendant={open && state.items.length && (active >= 0 || state.items[0].sure) ? `${id}-${Math.max(active, 0)}` : undefined}
           autoComplete="off"
           spellCheck={false}
           enterKeyHint="search"
@@ -286,7 +301,7 @@ export function SingleField({
   const open = focus && q.trim().length >= 2
   const { active, setActive, onKey } = useListNav(state.items.length, open, state.for)
   const pick = (s: Suggestion) => { setQ(''); onPick(s) }
-  const enter = useEnter(state, q, active, pick)
+  const enter = useEnter(state, q, active, setActive, pick)
   return (
     <div className="picker">
       <input
@@ -303,7 +318,7 @@ export function SingleField({
         aria-expanded={open}
         aria-controls={id}
         aria-autocomplete="list"
-        aria-activedescendant={open && state.items.length ? `${id}-${Math.max(active, 0)}` : undefined}
+        aria-activedescendant={open && state.items.length && (active >= 0 || state.items[0].sure) ? `${id}-${Math.max(active, 0)}` : undefined}
         autoComplete="off"
         spellCheck={false}
         enterKeyHint="search"

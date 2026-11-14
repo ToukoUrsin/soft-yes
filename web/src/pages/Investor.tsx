@@ -5,8 +5,9 @@ import { proofLine } from '../lib/export'
 import { capped, host, plural } from '../lib/format'
 import { walkStore } from '../lib/walk'
 import { Deal } from '../components/Deal'
+import { CheckLabel } from '../components/Evidence'
 import { ReportTag, WhyList } from '../components/Leads'
-import { Icon, Investor, InvestorList, Mark, NamesProvider } from '../components/ui'
+import { Icon, Investor, InvestorList, Mark, N, NamesProvider } from '../components/ui'
 import { YearBars } from '../components/YearBars'
 
 const VERDICT: Record<Verdict, { text: string; cls: string }> = {
@@ -122,6 +123,7 @@ export function InvestorPage() {
   const site = profile?.website ? (/^https?:/.test(profile.website) ? profile.website : `https://${profile.website}`) : null
   const none = !s.found || !s.rounds_in_cala
   const led = s.led_rounds ?? []
+  const fixed = s.led_corrected ?? []
   const followed = s.followed_rounds ?? []
   const noLead = followed.filter((r) => !r.leads.filter((n) => n !== s.name).length).length
 
@@ -171,7 +173,14 @@ export function InvestorPage() {
           </div>
         ) : (
           <>
-            <p className="inv__verdict">{s.insight}</p>
+            {s.doubt ? (
+              <p className="notice inv__doubt">
+                <Icon name="alert" size={14} />
+                {s.doubt.text}
+              </p>
+            ) : (
+              <p className="inv__verdict">{s.insight}</p>
+            )}
 
             <dl className="stats">
               <div>
@@ -211,34 +220,51 @@ export function InvestorPage() {
             <div className="inv__cols">
               <section className="inv__sec">
                 <h2>
-                  Rounds it led
-                  <span className="count num">{s.led ?? led.length}</span>
+                  Rounds it led<N>{s.led ?? led.length}</N>
                 </h2>
                 {led.length ? (
                   <ul className="deals">
                     {led.map((r) => (
-                      <Deal key={r.id} round={r} sources={r.sources} />
+                      <Deal key={r.id} round={r} sources={r.sources} check={r.check} who={s.name} stagePage={r.stage_page} />
                     ))}
                   </ul>
                 ) : (
-                  <p className="muted">Cala has no round that {s.name} led.</p>
+                  <p className="muted">{fixed.length ? `No round that ${s.name} led holds up on the page.` : `Cala has no round that ${s.name} led.`}</p>
                 )}
-                {(s.led ?? 0) > led.length && led.length > 0 && <p className="faint">The latest {led.length} are shown.</p>}
+                {(s.led ?? 0) > led.length && led.length > 0 && <p className="faint">{led.length === 1 ? 'Only the latest is shown.' : `The latest ${led.length} are shown.`}</p>}
+                {fixed.length > 0 && (
+                  <>
+                    <h3 className="inv__h3">Cala says it led {fixed.length === 1 ? 'this one' : 'these'}. The page names another lead<N>{fixed.length}</N></h3>
+                    <ul className="deals">
+                      {fixed.map((r) => (
+                        <Deal key={r.id} round={r} sources={r.sources} check={r.check} who={s.name} />
+                      ))}
+                    </ul>
+                    <p className="faint">Counted as rounds it followed.</p>
+                  </>
+                )}
               </section>
 
               <section className="inv__sec">
                 <h2>
-                  Rounds it followed, and who led
-                  <span className="count num">{Math.max(s.followed ?? 0, followed.length)}</span>
+                  Rounds it followed, and who led<N>{Math.max(s.followed ?? 0, followed.length)}</N>
                 </h2>
                 {followed.length ? (
                   <ul className="deals">
                     {followed.map((r) => (
-                      <Deal key={r.id} round={r} sources={r.sources}>
+                      <Deal key={r.id} round={r} sources={r.sources} stagePage={r.stage_page}>
                         {r.relation === 'cap_table' && <>backs the company, not listed in this round<span className="sep"> · </span></>}
                         {r.leads.length ? (
                           <>
                             led by <InvestorList names={r.leads.filter((n) => n !== s.name)} />
+                            {r.leads_on_page?.some((n) => n !== s.name) && (
+                              <>
+                                {' '}
+                                <CheckLabel status="lead">
+                                  {r.leads.filter((n) => n !== s.name).every((n) => r.leads_on_page?.includes(n)) ? 'on the page' : `${r.leads_on_page.filter((n) => n !== s.name).join(', ')} on the page`}
+                                </CheckLabel>
+                              </>
+                            )}
                           </>
                         ) : (
                           <span className="faint">no outside lead in Cala</span>
@@ -263,8 +289,7 @@ export function InvestorPage() {
 
             <section className="inv__sec">
               <h2>
-                Who leads when it follows
-                <span className="count num">{result.leads.length}</span>
+                Who leads when it follows<N>{result.leads.length}</N>
               </h2>
               {result.leads.length ? (
                 <>

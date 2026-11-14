@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'wouter'
-import { api, investorHref, type Company, type Config, type Example, type SoftInput, type StageId } from '../lib/api'
+import { api, investorHref, type Audit, type Company, type Config, type Example, type SoftInput, type StageId } from '../lib/api'
 import { isMac, listAnd, plural } from '../lib/format'
 import { recentRuns, useConfig, useSessionState, useTask } from '../lib/store'
 import { walkStore } from '../lib/walk'
@@ -59,11 +59,41 @@ function HowItWalks() {
             <span>Then reads that investor’s own record: does it still lead?</span>
           </div>
         </li>
+        <li>
+          <i className="hops__page" aria-hidden="true" />
+          <div>
+            <p>Opens the page behind each “led”</p>
+            <span>And shows the sentence. Where the page names another lead, the page wins.</span>
+          </div>
+        </li>
       </ol>
-      <p className="hops__end">
-        You get a ranked shortlist, the shared deal to cite, and the intro to ask your soft yes for.
-      </p>
+      <PageCheckLine />
     </aside>
+  )
+}
+
+/** What the page check has found so far, across every walk. The number is the proof; the link is the list. */
+function PageCheckLine() {
+  const [a, set] = useState<Audit | null>(null)
+  useEffect(() => {
+    const ctl = new AbortController()
+    api.audit(ctl.signal).then(set, () => undefined)
+    return () => ctl.abort()
+  }, [])
+  return (
+    <Link href="/audit" className="hops__audit">
+      <span>
+        {a && a.claims > 0 ? (
+          <>
+            <b className="num">{a.confirmed}</b> of <b className="num">{a.claims}</b> lead claims confirmed word for word
+            {a.corrected > 0 && <>, <b className="num">{a.corrected}</b> corrected</>}
+          </>
+        ) : (
+          'What the pages say'
+        )}
+      </span>
+      <Icon name="arrow" size={14} />
+    </Link>
   )
 }
 
@@ -117,6 +147,10 @@ function SoftYesAsk({ config }: { config: Config | null }) {
   const submit = () => {
     if (!tokens.length) return
     start(tokens.map((t) => ({ name: t.name, ids: t.ids, kind: t.kind })), stage === 'ANY' ? null : stage, company, navigate)
+    // The walk has what it needs. Coming back to this page starts from an empty form.
+    setTokens([])
+    setStage('ANY')
+    setCompany(null)
   }
   const submitRef = useRef(submit)
   submitRef.current = submit
@@ -269,19 +303,16 @@ function SoftYesAsk({ config }: { config: Config | null }) {
       <div className="home__side">
         <HowItWalks />
         <p className="home__principle">
-          Every fact comes from Cala with its source. No language model states a fact: one only phrases the messages, from facts it is
-          handed, and each draft is checked against them.
+          Every fact comes from Cala with its source. No language model states a fact. One only phrases the messages, and each draft
+          is checked against the facts it was handed.
         </p>
         {config?.mcp && (
           <div className="home__mcp">
-            <p>
-              <b>Rather ask your own assistant?</b> Soft Yes is also an MCP server. Add this address and ask it who could lead your
-              round.
-            </p>
-            <p className="home__mcprow">
-              <code className="truncate">{config.mcp}</code>
-              <CopyButton text={config.mcp} label="Copy" className="btn btn--ghost" />
-            </p>
+            <p>Soft Yes is also an MCP server. Add this address to your own assistant and ask it who could lead your round.</p>
+            <div className="copyfield">
+              <code className="truncate" title={config.mcp}>{config.mcp}</code>
+              <CopyButton text={config.mcp} label="Copy" className="btn btn--ghost btn--sm" />
+            </div>
           </div>
         )}
       </div>

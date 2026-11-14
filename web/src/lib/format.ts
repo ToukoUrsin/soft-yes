@@ -47,6 +47,11 @@ export function plural(n: number, word: string, many?: string): string {
 }
 
 /** "A", "A or B", "A, B or C" */
+/** "Tesi’s", "Lifeline Ventures’": a name that ends in s takes the apostrophe alone. */
+export function possessive(name: string): string {
+  return /s$/i.test(name.trim()) ? `${name}’` : `${name}’s`
+}
+
 export function listOr(names: string[]): string {
   if (names.length <= 1) return names[0] ?? ''
   return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`
@@ -111,3 +116,22 @@ export function fmtEventTime(start: string | null, end: string | null): string {
 }
 
 export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+
+/** "Series A", "pre-seed", "seed"; "round" when Cala has no stage for it. */
+export function stageWord(stageName: string | null | undefined): string {
+  if (!stageName || stageName === 'Round') return 'round'
+  return stageName.toLowerCase().replace(/series ([a-z])/, (_, c: string) => `Series ${c.toUpperCase()}`)
+}
+
+/** A sentence lifted from a page: links stripped from it leave " ," and footnote marks behind. */
+export function cleanQuote(q: string | null | undefined): string {
+  if (!q) return ''
+  return q
+    .replace(/\s*\[\s*\d+\s*\]/g, '')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^…\s*/, '… ')
+    .trim()
+}

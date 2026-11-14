@@ -1,21 +1,19 @@
 import type { ReactNode } from 'react'
 import { Link } from 'wouter'
 import { investorHref, type Lead, type Result, type Why } from '../lib/api'
-import { capped, dealPhrase, fmtDate, fmtMoney, fmtMonth, listAnd, plural } from '../lib/format'
+import { capped, dealPhrase, fmtDate, fmtMoney, fmtMonth, listAnd, plural, possessive } from '../lib/format'
 import { Deal } from './Deal'
 import { AskCala, Conflicts, Drafts, References, SaysDid, Slush } from './Tools'
-import { Icon, Investor, InvestorList, Segmented } from './ui'
+import { CheckLabel } from './Evidence'
+import { Icon, Investor, InvestorList, N, Segmented } from './ui'
 import { YearBars } from './YearBars'
 
-export type Tab = 'overview' | 'drafts' | 'says' | 'conflicts' | 'refs' | 'slush' | 'ask'
+export type Tab = 'record' | 'reach' | 'before' | 'ask'
 
 const TABS: { id: Tab; name: string }[] = [
-  { id: 'overview', name: 'Evidence' },
-  { id: 'drafts', name: 'Drafts' },
-  { id: 'says', name: 'Says vs did' },
-  { id: 'conflicts', name: 'Conflicts' },
-  { id: 'refs', name: 'References' },
-  { id: 'slush', name: 'At Slush' },
+  { id: 'record', name: 'Record' },
+  { id: 'reach', name: 'Reach out' },
+  { id: 'before', name: 'Before you meet' },
   { id: 'ask', name: 'Ask Cala' },
 ]
 
@@ -84,8 +82,7 @@ export function LeadList({
             <div className={`leads__tierhead leads__tierhead--${t.id}`}>
               <h3>
                 <i aria-hidden="true" />
-                {t.label}
-                <span className="count num">{t.count}</span>
+                {t.label}<N>{t.count}</N>
               </h3>
               <p>{t.note}</p>
             </div>
@@ -140,17 +137,14 @@ export function ReportTag() {
 
 // ----------------------------------------------------------------------------------------- detail
 
-function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
-  const p = lead.pulse
+/** Who to ask for the introduction, and the round that ties them to the lead. */
+function Intro({ lead }: { lead: Lead }) {
   const ask = lead.ask
+  if (!ask) return null
   const led = lead.ring === 1
-  const others = lead.asks.filter((a) => a.key !== ask?.key)
+  const others = lead.asks.filter((a) => a.key !== ask.key)
   const stageName = (d: { stage: string | null; stage_name: string | null }) => (d.stage && d.stage_name ? d.stage_name.toLowerCase().replace(/series ([a-z])/, (_, c: string) => `Series ${c.toUpperCase()}`) : 'round')
-  const evidenceIds = new Set(lead.evidence.map((e) => e.id))
-  const otherLed = lead.recent_leads.filter((r) => !evidenceIds.has(r.id))
   return (
-    <div className="ov">
-      {ask && (
         <section className="ov__sec ov__warm">
           <h3>Ask {ask.name} for the intro</h3>
           <p className="ov__lede">
@@ -163,7 +157,7 @@ function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
               </>
             ) : (
               <>
-                <Investor name={ask.name} /> was in {ask.last.issuer?.name ?? 'a company'}’s{' '}
+                <Investor name={ask.name} /> was in {ask.last.issuer?.name ? possessive(ask.last.issuer.name) : 'a company’s'}{' '}
                 {fmtMoney(ask.last.amount, ask.last.currency) ? `${fmtMoney(ask.last.amount, ask.last.currency)} ` : ''}
                 {stageName(ask.last)}
                 {fmtMonth(ask.last.date) ? ` in ${fmtMonth(ask.last.date)}` : ''}
@@ -178,29 +172,40 @@ function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
             lead={lead.name}
             led={led}
           />
-          <div className="ov__actions">
-            <button type="button" className="btn" onClick={onDraft}>
-              Draft the ask
-              <Icon name="arrow" size={14} />
-            </button>
-            {others.length > 0 && (
-              <span className="faint">
-                Also shares {others.map((o) => `${plural(o.deals, 'round')} with ${o.name}`).join(', ')}.
-              </span>
-            )}
-          </div>
+          {others.length > 0 && (
+            <p className="faint ov__also">
+              Also shares {others.map((o) => `${plural(o.deals, 'round')} with ${o.name}`).join(', ')}.
+            </p>
+          )}
         </section>
-      )}
+  )
+}
 
+function Record({ lead, onReach }: { lead: Lead; onReach: () => void }) {
+  const p = lead.pulse
+  const led = lead.ring === 1
+  const evidenceIds = new Set(lead.evidence.map((e) => e.id))
+  const otherLed = lead.recent_leads.filter((r) => !evidenceIds.has(r.id))
+  const checked = led ? lead.checked ?? 0 : 0
+  const confirmed = lead.confirmed ?? 0
+  return (
+    <div className="ov">
       <section className="ov__sec">
-        <h3>
-          {!led
-            ? 'Rounds it shared with your investors'
-            : lead.evidence.every((e) => e.relation === 'cap_table')
-              ? 'Rounds it led in companies your investors back'
-              : 'Rounds it led that your investors joined'}
-          <span className="count num">{lead.evidence.length}</span>
-        </h3>
+        <div className="ov__head">
+          <h3>
+            {!led
+              ? 'Rounds it shared with your investors'
+              : lead.evidence.every((e) => e.relation === 'cap_table')
+                ? 'Rounds it led in companies your investors back'
+                : 'Rounds it led that your investors joined'}
+            <N>{lead.evidence.length}</N>
+          </h3>
+          {checked > 0 && (
+            <CheckLabel status={confirmed > 0 ? 'lead' : 'unstated'}>
+              {confirmed === checked && checked === 1 ? 'Confirmed on the page' : `${confirmed} of ${checked} confirmed on the page`}
+            </CheckLabel>
+          )}
+        </div>
         <ul className="deals">
           {lead.evidence.map((e) => (
             <Deal
@@ -210,6 +215,10 @@ function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
               dateNote={e.date_is_report ? 'Date the round was first reported' : undefined}
               caution={e.caution}
               setAside={e.amount_set_aside}
+              check={led ? e.check : null}
+              who={lead.name}
+              promoted={e.promoted}
+              stagePage={e.stage_page}
             >
               {e.relation === 'cap_table' ? (
                 <>
@@ -242,6 +251,14 @@ function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
             </Deal>
           ))}
         </ul>
+        {lead.ask && (
+          <div className="ov__actions">
+            <button type="button" className="btn" onClick={onReach}>
+              Ask {lead.ask.name} for the intro
+              <Icon name="arrow" size={14} />
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="ov__sec">
@@ -319,7 +336,7 @@ function Overview({ lead, onDraft }: { lead: Lead; onDraft: () => void }) {
             <h4 className="ov__h4">Latest other rounds it led</h4>
             <ul className="deals">
               {otherLed.map((r) => (
-                <Deal key={r.id} round={r} sources={r.sources} />
+                <Deal key={r.id} round={r} sources={r.sources} check={r.check} who={lead.name} stagePage={r.stage_page} />
               ))}
             </ul>
           </>
@@ -344,6 +361,9 @@ export function LeadDetail({
   onClose?: () => void
 }) {
   const softNames = Array.from(new Set(lead.evidence.flatMap((e) => e.with)))
+  // The one caution that puts the whole lead in doubt gets its own line; the rest stay as short reasons.
+  const doubtWhy = lead.why.find((w) => w.tone === 'warn' && /wrong company/i.test(w.text))
+  const doubt = lead.doubt?.text ?? (lead.wrong_entity || doubtWhy ? 'Cala may have tied this name to the wrong company. Read the sources before you use it.' : null)
   return (
     <article className="detail" aria-label={lead.name} tabIndex={-1}>
       <header className="detail__head">
@@ -372,18 +392,48 @@ export function LeadDetail({
             <Link className="link" href={investorHref(lead.ids, lead.name)}>Lead or follow?</Link>
           </span>
         </p>
-        <WhyList why={lead.why.slice(1)} />
+        <WhyList why={lead.why.slice(1).filter((w) => w !== doubtWhy)} />
+        {doubt && (
+          <p className="notice detail__doubt">
+            <Icon name="alert" size={14} />
+            {doubt}
+          </p>
+        )}
       </header>
       <div className="detail__tabs">
         <Segmented options={TABS} value={tab} onChange={onTab} label="About this lead" role="tablist" />
       </div>
       <div className="detail__body" key={`${lead.key}:${tab}`}>
-        {tab === 'overview' && <Overview lead={lead} onDraft={() => onTab('drafts')} />}
-        {tab === 'drafts' && <Drafts lead={lead} result={result} />}
-        {tab === 'says' && <SaysDid lead={lead} result={result} />}
-        {tab === 'conflicts' && <Conflicts lead={lead} result={result} />}
-        {tab === 'refs' && <References lead={lead} result={result} />}
-        {tab === 'slush' && <Slush lead={lead} result={result} />}
+        {tab === 'record' && <Record lead={lead} onReach={() => onTab('reach')} />}
+        {tab === 'reach' && (
+          <div className="ov">
+            <Intro lead={lead} />
+            <section className="ov__sec">
+              <h3>The message</h3>
+              <Drafts lead={lead} result={result} />
+            </section>
+            <section className="ov__sec">
+              <h3>At Slush</h3>
+              <Slush lead={lead} result={result} />
+            </section>
+          </div>
+        )}
+        {tab === 'before' && (
+          <div className="ov">
+            <section className="ov__sec">
+              <h3>What it says, what it did</h3>
+              <SaysDid lead={lead} result={result} />
+            </section>
+            <section className="ov__sec">
+              <h3>Competitors it already backs</h3>
+              <Conflicts lead={lead} result={result} />
+            </section>
+            <section className="ov__sec">
+              <h3>Founders to call</h3>
+              <References lead={lead} result={result} />
+            </section>
+          </div>
+        )}
         {tab === 'ask' && <AskCala lead={lead} result={result} />}
       </div>
     </article>

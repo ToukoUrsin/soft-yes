@@ -30,7 +30,7 @@ body {
 }
 
 ::selection {
-  background: oklch(0.87 0.135 148 / 0.28);
+  background: oklch(1 0 0 / 0.24);
   color: var(--text);
 }
 
@@ -211,7 +211,7 @@ time {
 
 .btn:hover:not(:disabled) {
   background: var(--bg-3);
-  border-color: oklch(0.42 0.01 155);
+  border-color: oklch(0.42 0 0);
 }
 
 .btn:active:not(:disabled) {
@@ -282,8 +282,8 @@ time {
 }
 
 .btn--primary .kbd {
-  color: oklch(0.2 0.045 150 / 0.72);
-  border-color: oklch(0.2 0.045 150 / 0.28);
+  color: oklch(0.16 0 0 / 0.7);
+  border-color: oklch(0.16 0 0 / 0.26);
   background: transparent;
 }
 
@@ -319,7 +319,7 @@ time {
 }
 
 .input:hover {
-  border-color: oklch(0.42 0.01 155);
+  border-color: oklch(0.42 0 0);
 }
 
 .input:focus {
@@ -384,9 +384,10 @@ textarea.input {
 }
 
 .tag--warn {
-  color: var(--warn);
-  border-color: oklch(0.83 0.105 84 / 0.36);
-  background: var(--warn-wash);
+  color: var(--text-2);
+  border-style: dashed;
+  border-color: var(--line-2);
+  background: none;
 }
 
 .muted {
@@ -413,6 +414,18 @@ textarea.input {
 
 .seg::-webkit-scrollbar {
   display: none;
+}
+
+.seg[data-more='r'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+}
+
+.seg[data-more='l'] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 44px), transparent);
+}
+
+.seg[data-more='lr'] {
+  mask-image: linear-gradient(to right, transparent, #000 44px, #000 calc(100% - 44px), transparent);
 }
 
 .seg__opt {
@@ -518,7 +531,7 @@ textarea.input {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 6px;
   padding: 20px 0;
   color: var(--text-2);
   font-size: var(--fs);
@@ -527,7 +540,14 @@ textarea.input {
 
 .state strong {
   color: var(--text);
+  font-size: var(--fs-m);
   font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.state > .btn,
+.state > .state__row {
+  margin-top: 10px;
 }
 
 .state--error strong {
@@ -540,7 +560,7 @@ textarea.input {
   align-items: flex-start;
   padding: 10px 12px;
   border-radius: var(--r-2);
-  border: 1px solid oklch(0.83 0.105 84 / 0.3);
+  border: 1px solid var(--warn-line);
   background: var(--warn-wash);
   color: var(--text);
   font-size: var(--fs-s);
@@ -610,6 +630,7 @@ textarea.input {
   *::before,
   *::after {
     animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;

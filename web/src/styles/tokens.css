@@ -21,29 +21,32 @@
 :root {
   color-scheme: dark;
 
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
   --font: 'Schibsted Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* Ground: near-black with a trace of the accent's green, so greys and green sit in one family. */
-  --bg: oklch(0.155 0.004 155);
-  --bg-1: oklch(0.185 0.005 155);
-  --bg-2: oklch(0.215 0.006 155);
-  --bg-3: oklch(0.255 0.007 155);
-  --line: oklch(0.27 0.006 155);
-  --line-2: oklch(0.35 0.008 155);
+  /* Black and white. Every grey is neutral: no hue anywhere in the ground or the type. */
+  --bg: oklch(0.145 0 0);
+  --bg-1: oklch(0.178 0 0);
+  --bg-2: oklch(0.21 0 0);
+  --bg-3: oklch(0.25 0 0);
+  --line: oklch(0.262 0 0);
+  --line-2: oklch(0.35 0 0);
 
-  --text: oklch(0.955 0.004 155);
-  --text-2: oklch(0.77 0.008 155);
-  --text-3: oklch(0.64 0.008 155);
+  --text: oklch(0.95 0 0);
+  --text-2: oklch(0.76 0 0);
+  --text-3: oklch(0.63 0 0);
 
-  /* One accent. It means "lead" and "yes" and nothing else. */
-  --accent: oklch(0.87 0.135 148);
-  --accent-hover: oklch(0.91 0.125 148);
-  --accent-ink: oklch(0.2 0.045 150);
-  --accent-wash: oklch(0.87 0.135 148 / 0.09);
-  --accent-line: oklch(0.87 0.135 148 / 0.38);
+  /* The accent is white: a solid white mark means "lead", "yes" and "the page says so". */
+  --accent: oklch(0.985 0 0);
+  --accent-hover: oklch(1 0 0);
+  --accent-ink: oklch(0.16 0 0);
+  --accent-wash: oklch(1 0 0 / 0.07);
+  --accent-line: oklch(1 0 0 / 0.34);
 
-  --warn: oklch(0.83 0.105 84);
-  --warn-wash: oklch(0.83 0.105 84 / 0.09);
+  /* The one colour. It marks where a page corrects Cala, and cautions. Nothing else gets it. */
+  --warn: oklch(0.84 0.115 82);
+  --warn-wash: oklch(0.84 0.115 82 / 0.08);
+  --warn-line: oklch(0.84 0.115 82 / 0.4);
   --danger: oklch(0.76 0.14 28);
   --danger-wash: oklch(0.76 0.14 28 / 0.1);
 

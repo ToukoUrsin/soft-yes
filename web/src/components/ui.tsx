@@ -6,7 +6,7 @@ import { fmtDate, host, listAnd } from '../lib/format'
 // ------------------------------------------------------------------------------------------- icons
 // One family: 16px box, 1.5px stroke, round joins.
 
-type IconName = 'arrow' | 'out' | 'copy' | 'check' | 'x' | 'link' | 'download' | 'replay' | 'skip' | 'chevron' | 'plus' | 'alert' | 'enter'
+type IconName = 'arrow' | 'out' | 'copy' | 'check' | 'x' | 'link' | 'download' | 'replay' | 'skip' | 'chevron' | 'plus' | 'alert' | 'enter' | 'shuffle' | 'page'
 
 const PATHS: Record<IconName, ReactNode> = {
   arrow: <path d="M3 8h10M9 4l4 4-4 4" />,
@@ -42,6 +42,18 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   enter: <path d="M12.5 3.5v4a2 2 0 0 1-2 2h-7M6 6.5l-3 3 3 3" />,
+  shuffle: (
+    <>
+      <path d="M2.5 11h2.1c1.2 0 2.3-.7 2.9-1.7l1-1.6C9.1 6.7 10.2 6 11.4 6h2.1M11.8 4.3l1.7 1.7-1.7 1.7" />
+      <path d="M2.5 5h2.1c1 0 1.9.4 2.5 1.2M9.4 9.8c.6.8 1.5 1.2 2.5 1.2h1.6M11.8 9.3l1.7 1.7-1.7 1.7" />
+    </>
+  ),
+  page: (
+    <>
+      <path d="M4 2.5h5.5L12 5v8.5H4z" />
+      <path d="M6.2 7.5h3.6M6.2 10h3.6" />
+    </>
+  ),
 }
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
@@ -197,6 +209,33 @@ export function Segmented<T extends string>({
     requestAnimationFrame(() => ref.current?.querySelector<HTMLButtonElement>(`[data-id="${next.id}"]`)?.focus())
   }
   const tab = role === 'tablist'
+  // A row too long for its box scrolls sideways: mark which side has more, so the edge can fade instead of cutting a word.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const mark = () => {
+      const more = el.scrollWidth - el.clientWidth
+      el.dataset.more = more <= 1 ? '' : `${el.scrollLeft > 1 ? 'l' : ''}${el.scrollLeft < more - 1 ? 'r' : ''}`
+    }
+    mark()
+    el.addEventListener('scroll', mark, { passive: true })
+    const ro = new ResizeObserver(mark)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', mark)
+      ro.disconnect()
+    }
+  }, [])
+  useEffect(() => {
+    const el = ref.current
+    const on = el?.querySelector<HTMLElement>(`[data-id="${value}"]`)
+    if (!el || !on || el.scrollWidth - el.clientWidth <= 1) return
+    const box = el.getBoundingClientRect()
+    const b = on.getBoundingClientRect()
+    const pad = 48
+    if (b.left < box.left + pad) el.scrollBy({ left: b.left - box.left - pad, behavior: 'smooth' })
+    else if (b.right > box.right - pad) el.scrollBy({ left: b.right - box.right + pad, behavior: 'smooth' })
+  }, [value])
   return (
     <div
       ref={ref}
@@ -226,6 +265,16 @@ export function Segmented<T extends string>({
         )
       })}
     </div>
+  )
+}
+
+/** The count beside a heading. The space is a real character, so it survives flex headings and reads "Who could lead 20". */
+export function N({ children }: { children: ReactNode }) {
+  return (
+    <>
+      {'\u00A0'}
+      <span className="count num">{children}</span>
+    </>
   )
 }
 

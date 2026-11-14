@@ -26,7 +26,33 @@ export interface RoundBrief {
   currency: string | null
 }
 
-export interface RoundWithSources extends RoundBrief { sources?: Source[] }
+/**
+ * What the page Cala cites says about one "led" claim.
+ * lead: it says this investor led (quote). report: the round is from a report, not a round page.
+ * follower: it names another lead (led_by). unstated: it names the investor but not as lead. other: it says the investor
+ * led a different round of the company (other_round). absent: it does not name the investor. off: the page is about
+ * something else. unread: the page could not be read.
+ */
+export type CheckStatus = 'lead' | 'report' | 'follower' | 'unstated' | 'other' | 'absent' | 'off' | 'unread'
+export interface Check {
+  status: CheckStatus
+  quote?: string | null
+  url?: string | null
+  publisher?: string | null
+  led_by?: string[] | null
+  other_round?: string | null
+  /** The only page that says so is months older than the date Cala gives the round: the page's date and stage. */
+  earlier?: { date: string; stage_name: string | null } | null
+}
+/** Cala's stage label next to the one the page uses (null: the page names no stage). */
+export interface StagePage { cala: string; page: string | null }
+
+export interface RoundWithSources extends RoundBrief {
+  sources?: Source[]
+  check?: Check | null
+  stage_page?: StagePage | null
+  off_page?: boolean
+}
 
 /** "round": the soft yes was in this round. "cap_table": it backs the company; the round itself does not list it. */
 export type Relation = 'round' | 'cap_table'
@@ -45,10 +71,19 @@ export interface Evidence extends RoundBrief {
   /** Cala's date for the round is later than every page that names this lead: the row shows the report's date. */
   caution?: string | null
   /** An amount Cala attaches to the round from a page older than the round. Not shown as the round's size. */
-  amount_set_aside?: { amount: number; currency: string | null; reported: string } | null
+  amount_set_aside?: SetAside | null
+  check?: Check | null
+  /** Cala did not flag this investor as the lead; the page says it led. */
+  promoted?: boolean
+  stage_page?: StagePage | null
+  off_page?: boolean
+  stage_set_aside?: { stage: string; stage_name: string; other: string } | null
 }
 
-export type TierId = 'active' | 'thin' | 'quiet' | 'check'
+/** `reported`: the only page behind the amount is older than the round. `why: "page"`: no page read for the round states it. */
+export interface SetAside { amount: number; currency: string | null; reported?: string; why?: 'page' }
+
+export type TierId = 'active' | 'thin' | 'quiet' | 'unconfirmed' | 'check'
 export interface Tier { id: TierId; label: string; note: string; count: number }
 
 export interface YearCount { year: number; joined: number; led: number }
@@ -93,9 +128,25 @@ export interface Lead {
   portfolio: { id: string; name: string; sources: Source[] }[]
   at_slush?: AtSlush | null
   tier?: TierId
+  /** Of the rounds here whose page was read, how many say this investor led. */
+  confirmed?: number
+  checked?: number
+  /** Cala's record under this name looks like a different company. */
+  wrong_entity?: boolean
+  doubt?: Doubt | null
 }
 
-export interface FollowedRound extends RoundBrief { leads: string[]; sources: Source[]; relation?: Relation; via?: Via }
+export interface Doubt { founded?: number | null; round_year?: number | null; description?: string | null; text: string }
+
+export interface FollowedRound extends RoundBrief {
+  leads: string[]
+  /** The leads the cited page itself names. */
+  leads_on_page?: string[]
+  stage_page?: StagePage | null
+  sources: Source[]
+  relation?: Relation
+  via?: Via
+}
 
 export type Verdict = 'follows' | 'mixed' | 'leads' | 'thin' | 'unknown'
 
@@ -122,6 +173,53 @@ export interface SoftYes {
   /** Second pass through Cala's knowledge search, for investors with few rounds in the graph. */
   knowledge?: { question: string; read: number; kept: number; added: number; dropped: number; passages: number } | null
   cap_companies?: number
+  /** Rounds Cala says it led where the page names another lead. */
+  led_corrected?: RoundWithSources[] | null
+  doubt?: Doubt | null
+  /** Rounds added from reports. */
+  reports?: number
+  duplicates?: number | null
+}
+
+// ---- the page check
+
+interface FindingBase { round: string; company: string; stage_name: string | null; date: string | null }
+export interface ConfirmedRow extends FindingBase { kind: 'confirmed'; cala: string; quote: string; url: string; publisher: string | null }
+export interface LeadFinding extends FindingBase {
+  kind: 'lead'; cala: string; page: string[]; quote: string | null; url: string | null; publisher: string | null; other_round?: string | null
+}
+export interface AmountFinding extends FindingBase { kind: 'amount'; amount: number; currency: string | null; pages: string[] }
+export interface StageFinding extends FindingBase { kind: 'stage'; cala: string; page: string | null; pages: string[] }
+export type Finding = LeadFinding | AmountFinding | StageFinding
+
+export interface PageCheck {
+  rounds: number
+  pages: number
+  confirmed: number
+  corrected: number
+  added?: number
+  unstated: number
+  unread: number
+  amounts?: number
+  stages?: number
+  late?: number
+  findings: Finding[]
+  confirmed_rows: ConfirmedRow[]
+}
+
+export interface Audit {
+  walks: number
+  rounds: number
+  pages: number
+  claims: number
+  confirmed: number
+  corrected: number
+  unstated: number
+  unread: number
+  leads: LeadFinding[]
+  confirmed_rows: ConfirmedRow[]
+  amounts: AmountFinding[]
+  stages: StageFinding[]
 }
 
 export interface Ledger {
@@ -144,6 +242,8 @@ export interface Result {
     stage: StageId | null
     stage_name: string | null
     company: { id: string | null; name: string } | null
+    /** No stage given: the one most of the walked rounds carry. */
+    stage_usual?: { stage: string; stage_name: string; rounds: number; of: number } | null
   }
   headline: string
   soft_yeses: SoftYes[]
@@ -157,6 +257,8 @@ export interface Result {
   credits?: { used: number; cap: number; cached_calls: number }
   profile?: Profile | null
   slush?: { connected: boolean; firms: number; people: number; leads_attending: number }
+  /** The pages Cala cites, re-read: how many "led" claims they confirm, correct or leave open. */
+  page_check?: PageCheck | null
   /** Set on a first result while the second pass is still reading these investors; gone from the final one. */
   pending?: string[]
 }
@@ -200,6 +302,8 @@ export interface Suggestion {
   known_rounds: number
   /** The name typed is close to this one but not the same: a likely misspelling. */
   did_you_mean?: boolean
+  /** The top row is what was typed, with a record in Cala: Enter may take it. */
+  sure?: boolean
 }
 
 export interface Company {
@@ -223,7 +327,12 @@ export interface Draft {
   kind: DraftKind
   subject: string
   body: string
+  /** Checked against Cala. */
   facts: string[]
+  /** The founder's own words. Nothing checks them. */
+  yours?: string[]
+  /** Blanks the founder still has to fill in, as they appear in the text: "[your company]". */
+  placeholders?: string[]
   model: string | null
   checked: boolean
   fallback: boolean
@@ -313,6 +422,31 @@ export interface References {
   people: number
 }
 
+/** One company's rounds in Cala, each lead claim next to what the cited page says. */
+export interface CompanyRound {
+  id: string
+  stage_name: string | null
+  date: string | null
+  amount: number | null
+  currency: string | null
+  amount_set_aside?: unknown
+  cala_leads: string[]
+  investors: { name: string; cala_lead: boolean; is_lead: boolean; promoted: boolean; check: Check | null }[]
+  others: number
+  pages: { url: string; publisher: string | null; status: string }[]
+}
+export interface CompanyCheck {
+  q: string
+  company: { id: string; name: string; description: string | null } | null
+  matches: { id: string; name: string; description: string | null }[]
+  rounds: CompanyRound[]
+  rounds_in_cala?: number
+  investors_in_cala?: number | null
+  page_check: { rounds: number; pages: number; confirmed: number; corrected: number; unstated: number; unread: number }
+  /** No round in the graph: sentences from the pages Cala's knowledge search read. */
+  knowledge?: { question: string; passages: number; quotes: { quote: string; url: string; publisher: string; title: string; table?: boolean }[] } | null
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -334,7 +468,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch (e) {
       if ((e as Error).name === 'AbortError') throw e
     }
-    if (res?.ok) return (await res.json()) as T
+    if (res?.ok) {
+      const body = await res.json()
+      // A slow answer is sent behind a trickle of spaces, so a failure after that arrives inside a 200.
+      if (body && typeof body === 'object' && typeof body.failed === 'number') {
+        throw new ApiError(body.failed, typeof body.detail === 'string' ? body.detail : `The server answered ${body.failed}.`)
+      }
+      return body as T
+    }
     const transient = !res || (res.status >= 502 && res.status <= 504)
     if (transient && attempt < RETRY_MS.length) {
       await sleep(RETRY_MS[attempt])
@@ -361,6 +502,8 @@ const qs = (params: Record<string, string | undefined | null>) =>
 
 export const api = {
   config: () => request<Config>('/api/config'),
+  audit: (signal?: AbortSignal) => request<Audit>('/api/audit', { signal }),
+  check: (by: { q?: string; id?: string }, signal?: AbortSignal) => request<CompanyCheck>(`/api/check?${qs(by)}`, { signal }),
   examples: () => request<{ examples: Example[] }>('/api/examples'),
   suggest: (q: string, signal?: AbortSignal) =>
     request<{ items: Suggestion[]; source: 'index' | 'cala' | 'none' }>(`/api/suggest?${qs({ q })}`, { signal }),

@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
-import type { RoundBrief, Source } from '../lib/api'
+import type { Check, RoundBrief, SetAside, Source, StagePage } from '../lib/api'
 import { fmtDate, fmtMoney, fmtMonth } from '../lib/format'
+import { CheckNote, StageNote } from './Evidence'
 import { Icon, Sources } from './ui'
 
-/** One funding round as a row: company, stage, amount, date, then context and the sources behind it. */
+/** One funding round as a row: company, stage, amount, date, the context, and what the cited page says about who led. */
 export function Deal({
-  round, sources, children, dateNote, caution, setAside,
+  round, sources, children, dateNote, caution, setAside, check, who, promoted, stagePage,
 }: {
   round: RoundBrief
   sources?: Source[] | null
@@ -14,13 +15,19 @@ export function Deal({
   /** Why a fact on this row should be read with care. */
   caution?: string | null
   /** An amount Cala holds for the round that its sources do not back for this round. */
-  setAside?: { amount: number; currency: string | null; reported: string } | null
+  setAside?: SetAside | null
+  /** What the page Cala cites says about `who` leading this round. */
+  check?: Check | null
+  who?: string
+  /** The page says it led; Cala had not flagged it. */
+  promoted?: boolean
+  stagePage?: StagePage | null
 }) {
   const stage = round.stage && round.stage_name ? round.stage_name : ''
   const money = fmtMoney(round.amount, round.currency)
   const when = fmtDate(round.date)
   return (
-    <li className="deal">
+    <li className={`deal${check?.status === 'follower' ? ' deal--fix' : ''}`}>
       <div className="deal__row">
         <span className="deal__co truncate" title={round.issuer?.name ?? undefined}>{round.issuer?.name ?? 'Unnamed company'}</span>
         <span className="deal__stage truncate">{stage}</span>
@@ -33,6 +40,8 @@ export function Deal({
           <Sources sources={sources} />
         </div>
       )}
+      <CheckNote check={check} who={who} promoted={promoted} />
+      <StageNote stage={stagePage} />
       {caution && (
         <p className="deal__note">
           <Icon name="alert" size={12} />
@@ -40,11 +49,11 @@ export function Deal({
         </p>
       )}
       {setAside && (
-        <p className="deal__note deal__note--plain">
-          <span>
-            No amount shown: Cala lists {fmtMoney(setAside.amount, setAside.currency) || 'one'}, but the only page behind it is from{' '}
-            {fmtMonth(setAside.reported)}, before this round.
-          </span>
+        <p className="chk__aside">
+          <span>Amount</span>
+          {setAside.why === 'page' || !setAside.reported
+            ? `Cala lists ${fmtMoney(setAside.amount, setAside.currency) || 'one'}. No page it cites for this round states it, so none is shown.`
+            : `Cala lists ${fmtMoney(setAside.amount, setAside.currency) || 'one'}, from a page dated ${fmtMonth(setAside.reported)}, before this round. None is shown.`}
         </p>
       )}
     </li>

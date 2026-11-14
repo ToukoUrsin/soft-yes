@@ -98,6 +98,30 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
     # is Cala's label the one these pages give the round? Their headlines say; without one, any use on the page counts
     label_used = stage in c["headline"] if c.get("headline") else stage in c["stages"]
     elsewhere = {k for k, st in at_lead.items() if known and st and stage not in st} if here or label_used else set()
+    # A page published long before the round cannot be about it: what it says was led is an earlier round of the company.
+    when = None if rd.get("date_is_report") else rd.get("date")
+    early = {k for k, v in c["leads"].items()
+             if k in by_key and k not in here and _days_before(c.get("dated", {}).get(v["url"]), when) > pagecheck.NEAR_DAYS}
+
+    def other_stage(key: str, url: str) -> str | None:
+        """The stage the page gives the round it speaks of: on the leading phrase, else the only one it names."""
+        named = at_lead.get(key) or set()
+        if not named:
+            on_page = [st for st in c.get("page_stages", {}).get(url, []) if st != stage]
+            named = set(on_page) if len(on_page) == 1 else set()
+        was = sorted(named, key=list(pagecheck.STAGES_ON_PAGE).index)[0] if named else None
+        return graph.STAGE_NAMES.get(was, was) if was else None
+
+    cala_keys = {graph.norm(i["name"]) for i in cala_leads}
+    if any(k in cala_keys and k not in early and k not in elsewhere for k in c["leads"]):
+        # another lead of this round is confirmed by a page from its own time: Cala holds two rounds as one here,
+        # and the old page is about the other
+        elsewhere |= early
+    else:
+        # every page that names a lead is that old: one round, which Cala dates late. The claim is kept with the page's date.
+        for k in early:
+            c["leads"][k] = {**c["leads"][k], "earlier": {"date": c["dated"][c["leads"][k]["url"]],
+                                                           "stage_name": other_stage(k, c["leads"][k]["url"])}}
     page_leads = [by_key[k] for k in c["leads"] if k in by_key and k not in elsewhere]
     for i in rd["investors"]:
         if not i["is_lead"]:
@@ -105,11 +129,10 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         key = graph.norm(i["name"])
         hit, listed = c["leads"].get(key), c["followers"].get(key)
         if hit and key in elsewhere:
-            was = sorted(at_lead[key], key=list(pagecheck.STAGES_ON_PAGE).index)[0]
-            if listed:   # one page says it led the other round, another lists it under this round's lead
+            if listed and key not in early:   # one page says it led the other round, another lists it under this round's lead
                 hit = None
             else:
-                i["check"] = {"status": "other", **hit, "other_round": graph.STAGE_NAMES.get(was, was)}
+                i["check"] = {"status": "other", **hit, "other_round": other_stage(key, hit["url"])}
                 tally["unstated"] += 1
                 continue
         if hit:
@@ -166,6 +189,14 @@ def _apply_check(rd: dict, c: dict | None, tally: collections.Counter) -> None:
         tally["stages"] += 1
 
 
+def _days_before(page_date: str | None, round_date: str | None) -> int:
+    """How many days before the round a page was published (0 when either date is missing or unreadable)."""
+    try:
+        return (date.fromisoformat((round_date or "")[:10]) - date.fromisoformat((page_date or "")[:10])).days
+    except ValueError:
+        return 0
+
+
 def _led_by(page_leads: list[str], quote: str | None, me: str) -> list[str]:
     """Who the page says led: the leads named in the quoted sentence when it names any (Cala can fold two rounds of
     a company into one, each with its own lead), and one name per firm ('Acton Capital', 'Acton Capital Partners')."""
@@ -192,8 +223,11 @@ def _note_check(rd: dict, c: dict | None, findings: list[dict], claims: list[lis
             continue
         claims.append([rd["id"], graph.norm(i["name"]), ch["status"]])
         if ch["status"] == "lead" and co and ch.get("quote") and ch.get("url"):
-            findings.append({**base, "kind": "confirmed", "cala": i["name"], "quote": ch["quote"], "url": ch["url"],
-                             "publisher": ch.get("publisher")})
+            # a claim only an older page backs is listed as that page has it: its date, and its stage or none
+            findings.append({**base, **(ch.get("earlier") or {}), "kind": "confirmed", "cala": i["name"], "quote": ch["quote"],
+                             "url": ch["url"], "publisher": ch.get("publisher")})
+            if ch.get("earlier") and not ch["earlier"]["stage_name"]:
+                findings[-1]["stage_name"] = "Round"
         if ch["status"] == "follower" and co and not _no_name(i["name"]):
             findings.append({**base, "kind": "lead", "cala": i["name"], "page": ch.get("led_by") or [], "quote": ch.get("quote"),
                              "url": ch.get("url"), "publisher": ch.get("publisher"), "other_round": ch.get("other_round")})

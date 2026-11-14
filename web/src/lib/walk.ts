@@ -3,7 +3,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type { Kind, Relation, Result, RoundBrief, SoftInput, StageId, Via } from './api'
-import { fmtMonth, listAnd, plural } from './format'
+import { fmtMonth, listAnd, plural, possessive } from './format'
 
 interface Tally { cala_calls?: number; fresh?: number; cached?: number }
 
@@ -18,6 +18,8 @@ export type WalkEvent =
   | { t: 'leads'; count: number; top: { key: string; name: string }[] }
   | ({ t: 'pulse'; key: string; name: string; rounds: number; led: number } & Tally)
   | ({ t: 'verify'; key: string; round: RoundBrief } & Tally)
+  // The pages Cala cites are opened and read for who led: first how many rounds, then what the pages said.
+  | { t: 'pages'; state: 'reading' | 'done'; rounds: number; pages?: number; confirmed?: number; corrected?: number; unstated?: number }
   | { t: 'note'; text: string }
   | ({ t: 'ledger' } & Tally)
   | { t: 'done'; run_id: string; result: Result }
@@ -63,6 +65,18 @@ export interface GraphModel {
   settled: boolean
 }
 
+/** The page check as a step of the walk: reading, then what the pages said about the lead claims. */
+export interface PagesStep {
+  state: 'reading' | 'done'
+  /** rounds whose pages are being read now */
+  rounds: number
+  pages: number
+  confirmed: number
+  corrected: number
+  unstated: number
+  unread: number
+}
+
 export interface Counters {
   calls: number
   facts: number
@@ -91,6 +105,8 @@ export interface WalkState {
   runId: string | null
   error: string | null
   inputs: WalkInputs | null
+  /** null until the walk reaches the pages (and for walks stored before pages were read) */
+  pages: PagesStep | null
   /** set while the second pass (Cala's knowledge search) is still reading; the first result is already shown */
   deep: { reading: string[]; line: string; added: number } | null
   /** how many walks have started; lets views reset per walk */
@@ -111,6 +127,7 @@ const initial: WalkState = {
   runId: null,
   error: null,
   inputs: null,
+  pages: null,
   deep: null,
   generation: 0,
 }
@@ -154,7 +171,7 @@ export function applyEvent(s: WalkState, e: WalkEvent): WalkState {
         ...s,
         model: { ...m, softs },
         counters: ((c) => ({ ...c, facts: c.facts + e.rounds }))(tally(s.counters, e)),
-        narration: none ? `Cala has no funding rounds for ${e.name}` : `Reading ${e.name}'s ${plural(e.rounds, 'round')} in Cala`,
+        narration: none ? `Cala has no funding rounds for ${e.name}` : `Reading ${possessive(e.name)} ${plural(e.rounds, 'round')} in Cala`,
         detail: none ? 'Nothing to walk from it' : `It led ${e.led} and followed in ${e.followed}`,
       }
     }
@@ -230,6 +247,23 @@ export function applyEvent(s: WalkState, e: WalkEvent): WalkState {
         detail: `${roundPhrase(e.round)}${when ? `, ${when}` : ''}`,
       }
     }
+    case 'pages': {
+      const pages = pagesStep(s.pages, e)
+      if (e.state === 'reading') {
+        return {
+          ...s,
+          pages,
+          narration: 'Opening the pages Cala cites',
+          detail: `Reading what they say about who led ${e.rounds === 1 ? 'this round' : `these ${e.rounds} rounds`}`,
+        }
+      }
+      return {
+        ...s,
+        pages,
+        narration: `Read ${plural(pages.pages, 'page')}`,
+        detail: pagesLine(pages),
+      }
+    }
     case 'note':
       return { ...s, notes: s.notes.includes(e.text) ? s.notes : [...s.notes, e.text] }
     case 'ledger':
@@ -242,6 +276,29 @@ export function applyEvent(s: WalkState, e: WalkEvent): WalkState {
       // An event this build does not know: the walk goes on.
       return s
   }
+}
+
+function pagesStep(prev: PagesStep | null, e: Extract<WalkEvent, { t: 'pages' }>): PagesStep {
+  const base = prev ?? { state: 'reading' as const, rounds: 0, pages: 0, confirmed: 0, corrected: 0, unstated: 0, unread: 0 }
+  if (e.state === 'reading') return { ...base, state: 'reading', rounds: e.rounds }
+  return {
+    ...base, state: 'done', rounds: e.rounds, pages: e.pages ?? base.pages, confirmed: e.confirmed ?? base.confirmed,
+    corrected: e.corrected ?? base.corrected, unstated: e.unstated ?? base.unstated,
+  }
+}
+
+/** "45 lead claims confirmed word for word, 2 corrected, 5 the page does not say" */
+export function pagesLine(p: { confirmed: number; corrected: number; unstated: number }): string {
+  const parts = [`${plural(p.confirmed, 'lead claim')} confirmed word for word`]
+  if (p.corrected) parts.push(`${p.corrected} corrected`)
+  if (p.unstated) parts.push(`${p.unstated} the page does not say`)
+  return parts.join(', ')
+}
+
+function pagesFromResult(result: Result): PagesStep | null {
+  const pc = result.page_check
+  if (!pc) return null
+  return { state: 'done', rounds: pc.rounds, pages: pc.pages, confirmed: pc.confirmed, corrected: pc.corrected, unstated: pc.unstated, unread: pc.unread }
 }
 
 /**
@@ -276,6 +333,12 @@ function applyDeep(s: WalkState, e: WalkEvent): WalkState {
           added: deep.added + 1,
           line: e.leads.length ? `${roundPhrase(e.round)}: led by ${listAnd(e.leads.map((l) => l.name))}` : `${roundPhrase(e.round)}: no outside lead named`,
         },
+      }
+    case 'pages':
+      return {
+        ...s,
+        pages: pagesStep(s.pages, e),
+        deep: e.state === 'reading' ? { ...deep, line: `Opening the pages Cala cites for ${plural(e.rounds, 'more round')}` } : deep,
       }
     case 'note':
     case 'error':
@@ -379,6 +442,11 @@ export function eventsFromResult(result: Result): WalkEvent[] {
       })
     }
   }
+  const pc = result.page_check
+  if (pc) {
+    out.push({ t: 'pages', state: 'reading', rounds: pc.rounds })
+    out.push({ t: 'pages', state: 'done', rounds: pc.rounds, pages: pc.pages, confirmed: pc.confirmed, corrected: pc.corrected, unstated: pc.unstated })
+  }
   out.push({ t: 'leads', count: result.leads.length, top: result.leads.slice(0, 12).map((l) => ({ key: l.key, name: l.name })) })
   for (const l of [...result.leads, ...result.second_ring]) {
     if (!l.pulse) continue
@@ -409,8 +477,10 @@ function finalCounters(result: Result): Counters {
 
 const BASE_DELAY: Record<WalkEvent['t'], number> = {
   start: 420, investor: 560, round: 135, leads: 520, pulse: 105, verify: 180, note: 500, ledger: 0, done: 0, error: 0,
-  partial: 0, knowledge: 0, captable: 0,
+  partial: 0, knowledge: 0, captable: 0, pages: 0,
 }
+/** The page check keeps its own beat however long the walk is: long enough to see the pages being read, then what they said. */
+const PAGES_MS = { reading: 1500, done: 1100 }
 const TARGET_MS = 8200
 const SETTLE_MS = 950
 
@@ -472,6 +542,7 @@ class WalkStore {
       phase: 'done',
       model: modelFromResult(result),
       counters: finalCounters(result),
+      pages: pagesFromResult(result),
       notes: result.notes ?? [],
       result,
       runId: result.run_id,
@@ -589,7 +660,7 @@ class WalkStore {
     this.total = 0
     this.final = null
     const { inputs, generation, mode } = this.state
-    this.set({ ...initial, mode, inputs, generation, phase: 'walking', narration: 'Asking Cala', detail: '' })
+    this.set({ ...initial, mode, inputs, generation, phase: 'walking', narration: 'Asking Cala again', detail: 'The connection dropped. Nothing is lost.' })
   }
 
   /** The first result is on screen and the stream is gone: the walk goes on at the server, so wait for what it stores. */
@@ -658,7 +729,8 @@ class WalkStore {
     // The beat holds even when nothing is queued yet: an answer Cala already had arrives one event at a
     // time and faster than anyone can read, and the next one must still wait its turn.
     const scale = Math.min(1, Math.max(0.3, TARGET_MS / Math.max(1, this.budget)))
-    this.timer = window.setTimeout(this.step, this.late.has(e) ? 16 : Math.max(16, (BASE_DELAY[e.t] ?? 0) * scale))
+    const wait = e.t === 'pages' ? PAGES_MS[e.state] : (BASE_DELAY[e.t] ?? 0) * scale
+    this.timer = window.setTimeout(this.step, this.late.has(e) ? 16 : Math.max(16, wait))
   }
 
   private play(e: WalkEvent, instant: boolean) {
@@ -703,6 +775,7 @@ class WalkStore {
         : null,
       model: settled,
       counters: finalCounters(result),
+      pages: pagesFromResult(result) ?? this.state.pages,
       notes: Array.from(new Set([...this.state.notes, ...(result.notes ?? [])])),
       result,
       runId: result.run_id,
