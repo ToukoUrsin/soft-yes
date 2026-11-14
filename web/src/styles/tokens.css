@@ -1,0 +1,75 @@
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 900;
+  src: url('@fontsource-variable/schibsted-grotesk/files/schibsted-grotesk-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF,
+    U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 900;
+  src: url('@fontsource-variable/schibsted-grotesk/files/schibsted-grotesk-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  color-scheme: dark;
+
+  --font: 'Schibsted Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Ground: near-black with a trace of the accent's green, so greys and green sit in one family. */
+  --bg: oklch(0.155 0.004 155);
+  --bg-1: oklch(0.185 0.005 155);
+  --bg-2: oklch(0.215 0.006 155);
+  --bg-3: oklch(0.255 0.007 155);
+  --line: oklch(0.27 0.006 155);
+  --line-2: oklch(0.35 0.008 155);
+
+  --text: oklch(0.955 0.004 155);
+  --text-2: oklch(0.77 0.008 155);
+  --text-3: oklch(0.64 0.008 155);
+
+  /* One accent. It means "lead" and "yes" and nothing else. */
+  --accent: oklch(0.87 0.135 148);
+  --accent-hover: oklch(0.91 0.125 148);
+  --accent-ink: oklch(0.2 0.045 150);
+  --accent-wash: oklch(0.87 0.135 148 / 0.09);
+  --accent-line: oklch(0.87 0.135 148 / 0.38);
+
+  --warn: oklch(0.83 0.105 84);
+  --warn-wash: oklch(0.83 0.105 84 / 0.09);
+  --danger: oklch(0.76 0.14 28);
+  --danger-wash: oklch(0.76 0.14 28 / 0.1);
+
+  --fs-micro: 0.6875rem; /* 11 */
+  --fs-xs: 0.75rem; /* 12 */
+  --fs-s: 0.8125rem; /* 13 */
+  --fs: 0.875rem; /* 14 */
+  --fs-m: 0.9375rem; /* 15 */
+  --fs-l: 1.125rem; /* 18 */
+  --fs-xl: 1.375rem; /* 22 */
+
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --fast: 150ms;
+  --mid: 220ms;
+
+  --gutter: 32px;
+  --page: 1200px;
+  --topbar: 48px;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --gutter: 16px;
+  }
+}

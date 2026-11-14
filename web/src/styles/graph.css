@@ -1,0 +1,413 @@
+/* The walk: three columns threaded by 1px curves. Open ring = soft yes, solid = a lead whose record was read. */
+
+.graph {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+
+.graph__heads {
+  position: relative;
+  height: 28px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.graph__heads span {
+  position: absolute;
+  top: 0;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  line-height: 20px;
+}
+
+.graph__heads b {
+  margin-left: 8px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.graph__body {
+  position: relative;
+  transition: height 320ms var(--ease);
+}
+
+.graph__svg {
+  position: absolute;
+  inset: 0 auto auto 0;
+  overflow: visible;
+  pointer-events: none;
+  shape-rendering: geometricPrecision;
+}
+
+.edge {
+  fill: none;
+  stroke-width: 1;
+  transition: opacity var(--fast) var(--ease), stroke var(--fast) var(--ease);
+}
+
+.edge--soft {
+  stroke: var(--line-2);
+}
+
+.edge--lead {
+  stroke: var(--accent);
+  stroke-opacity: 0.5;
+}
+
+.edge--soft.is-hot {
+  stroke: var(--text-2);
+}
+
+.edge--lead.is-hot {
+  stroke-opacity: 1;
+  stroke-width: 1.5;
+}
+
+.edge.is-dim {
+  opacity: 0.16;
+}
+
+.gport__in {
+  fill: var(--text-3);
+}
+
+.gport__out {
+  fill: var(--accent);
+}
+
+.gport.is-none .gport__in {
+  fill: var(--line-2);
+}
+
+.gport,
+.gsoft,
+.glead {
+  transition: opacity var(--fast) var(--ease);
+}
+
+.gport.is-dim,
+.gsoft.is-dim,
+.glead.is-dim {
+  opacity: 0.25;
+}
+
+.gsoft {
+  fill: var(--bg);
+  stroke: var(--text-3);
+  stroke-width: 1.5;
+  stroke-dasharray: 2.4 2.4;
+  transition: stroke var(--mid) var(--ease), opacity var(--fast) var(--ease);
+}
+
+.gsoft.is-read {
+  stroke: var(--text);
+  stroke-dasharray: none;
+}
+
+.glead__dot {
+  fill: var(--bg);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  transition: fill var(--mid) var(--ease), r var(--mid) var(--ease);
+}
+
+.glead.is-read .glead__dot {
+  fill: var(--accent);
+}
+
+.glead__burst {
+  display: none;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.glead__sel {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1;
+}
+
+/* Labels sit in HTML over the drawing so they truncate and align like a table. */
+
+.gl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-s);
+  line-height: 1.2;
+  transition: opacity var(--fast) var(--ease);
+  will-change: transform;
+}
+
+.gl.is-dim {
+  opacity: 0.3;
+}
+
+.gl--soft {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  text-align: right;
+  padding-right: 0;
+}
+
+.gl--soft .gl__name {
+  max-width: 100%;
+  font-weight: 600;
+  font-size: var(--fs);
+  color: var(--text);
+}
+
+.gl--soft .gl__sub {
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.gl--round {
+  gap: 12px;
+  color: var(--text-2);
+  cursor: default;
+}
+
+.gl--round .gl__co {
+  flex: 1 1 0;
+  color: var(--text);
+}
+
+.gl--round .gl__stage {
+  flex: 0 0 68px;
+}
+
+.gl--round .gl__amt {
+  flex: 0 0 52px;
+  text-align: right;
+}
+
+.gl--round .gl__when {
+  flex: 0 0 62px;
+  text-align: right;
+  color: var(--text-3);
+}
+
+.gl--round.is-none {
+  opacity: 0.5;
+}
+
+.gl--round.is-none.is-dim {
+  opacity: 0.22;
+}
+
+.gl--round.is-hot .gl__co {
+  color: var(--text);
+}
+
+.gl--lead {
+  gap: 8px;
+  padding: 0 6px;
+  border-radius: var(--r-1);
+  color: var(--text);
+  text-align: left;
+  transition: background var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+
+.gl--lead:not(:disabled) {
+  cursor: pointer;
+}
+
+.gl--lead:disabled {
+  color: var(--text);
+}
+
+.gl--lead:not(:disabled):hover {
+  background: var(--bg-2);
+}
+
+.gl--lead.is-selected {
+  background: var(--bg-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.gl--lead .gl__rank {
+  flex: 0 0 16px;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.gl--lead .gl__name {
+  flex: 0 1 auto;
+  font-weight: 500;
+}
+
+.gl--lead .gl__sub {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.gl--lead.is-read .gl__sub {
+  color: var(--text-2);
+}
+
+.graph__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.graph__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.graph__legend-dim {
+  margin-left: auto;
+}
+
+.lg {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.lg--soft {
+  border: 1.5px solid var(--text);
+}
+
+.lg--lead {
+  background: var(--accent);
+}
+
+.lg--unread {
+  border: 1.5px solid var(--accent);
+}
+
+/* Density */
+
+.graph--mid .gl--round .gl__stage {
+  flex-basis: 60px;
+}
+
+.graph--compact .gl {
+  font-size: var(--fs-xs);
+}
+
+.graph--compact .gl--soft .gl__name {
+  font-size: var(--fs-xs);
+}
+
+.graph--compact .gl--lead {
+  gap: 5px;
+  padding: 0 4px;
+}
+
+.graph--compact .gl--lead .gl__rank {
+  flex-basis: 13px;
+  font-size: var(--fs-micro);
+}
+
+.graph--compact .graph__legend-dim {
+  margin-left: 0;
+}
+
+/* Live: things draw in as Cala answers. */
+
+.graph--live .edge {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: g-draw 460ms var(--ease) forwards;
+}
+
+.graph--live .edge--lead {
+  animation-delay: 90ms;
+}
+
+.graph--live .gl--round,
+.graph--live .gl--soft {
+  animation: g-in 240ms var(--ease) backwards;
+}
+
+.graph--live .gl--lead .gl__name,
+.graph--live .gl--lead .gl__sub {
+  animation: g-in 260ms var(--ease) backwards;
+}
+
+.graph--live .gl--lead .gl__name {
+  animation-delay: 140ms;
+}
+
+.graph--live .gport,
+.graph--live .gsoft {
+  animation: g-fade 200ms var(--ease) backwards;
+}
+
+.graph--live .glead__dot {
+  animation: g-pop 320ms var(--ease) 140ms backwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.graph--live .glead__burst {
+  display: block;
+  animation: g-burst 620ms var(--ease) both;
+}
+
+.graph--live .gl__rank {
+  animation: g-in 300ms var(--ease) backwards;
+}
+
+@keyframes g-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes g-in {
+  from {
+    opacity: 0;
+    translate: -6px 0;
+  }
+}
+
+@keyframes g-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes g-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+@keyframes g-burst {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
