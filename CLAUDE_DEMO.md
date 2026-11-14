@@ -1,6 +1,6 @@
 # Soft Yes in Claude: the demo
 
-Checked 14.11 at 14:10 EET on claude.ai in Chrome, on your Claude account. The connector "Soft Yes" is already added and connected there.
+Checked 14.11 at 14:10 and again at 15:30 EET on claude.ai in Chrome, on your Claude account. The connector "Soft Yes" is already added and connected there.
 
 ## Before you walk over
 
@@ -25,20 +25,28 @@ Checked 14.11 at 14:10 EET on claude.ai in Chrome, on your Claude account. The c
 - **0 to 10 s.** "Every founder hears 'we're in once you have a lead'. Two investors said that to us." Paste the message, press Allow once.
 - **10 to 30 s**, while it draws. "This is your graph. The rounds Tesi and Innovestor joined, and who led them. Every 'led' is checked against the page you cite for it."
 - **30 to 45 s**, point at Lifeline. "Start with Lifeline. That's the sentence from the page. Tesi was in that round, so Tesi opens the door."
-- **45 to 60 s**, point at the numbers row. "Two of your 'led' flags didn't match the page. They are struck out and never reach an email. Zero facts come from a language model."
+- **45 to 60 s**, tap **Draft the ask to Tesi** in the card. The ask opens right there in about a second, with every fact in it and where it is from. "Two of your 'led' flags didn't match the page. They never reach this email. Zero facts come from a language model."
 
 Then ask: "Would a founder use this the week before Slush?"
 
+## Buttons in the card
+
+All checked in real Claude at 15:30. None of them asks for Allow once.
+
+- **Draft the ask to Tesi**: the ask opens inside the card. **Open in Gmail** puts it in a new Gmail message (Claude asks "Open external link" first). **Copy** copies it.
+- **Who else opens this door**: the network. Tesi and Innovestor, 25 rounds, 95 other investors.
+- **One hop from Lifeline**: walks Cala one round further out, live. 23 rounds, 86 investors.
+- **Replay** runs the drawing again. **Expand** makes it full screen.
+
 ## If they want more
 
-Type these. The server answers each in under a second.
+Type these. Each one is a new Allow once.
 
-- `Draft the intro ask to Tesi about Lifeline Ventures.` Checked in real Claude at 14:45. Claude looks in your Gmail for Tesi's mail, draws the ask with every fact and where it is from, opens the round tracker (Lead open, Tesi and Innovestor said yes) and saves the ask as a Gmail draft. Nothing is sent. About a minute, and it asks for Allow once three times.
-- `Show me the network around Lifeline Ventures.` Who else opens that door.
+- `Draft the intro ask to Tesi about Lifeline Ventures.` Checked in real Claude at 14:45. Claude looks in your Gmail for Tesi's mail, draws the ask, opens the round tracker and saves a Gmail draft. Nothing is sent. About a minute, Allow once three times. The button in the card is faster.
 - `Who could lead Cala AI's next round? Use Soft Yes.` Their own company. It starts from Kfund, Lightspeed, Kibo and Masia: 27 leads, Base10 Partners first.
 - `Who led Cala AI's rounds, by the page?` Each "led" Cala holds for Cala AI, next to the page's sentence.
 
-The first message and the draft are checked in real Claude. The other three work in the stand-in chat (below). If Claude answers in text with no card, add "use Soft Yes".
+The last two work in the stand-in chat (below) but are not run in real Claude yet. If Claude answers in text with no card, add "use Soft Yes".
 
 ## Reset
 
@@ -52,7 +60,8 @@ The site still works as before: https://soft-yes.fly.dev/r/5c6518e3ff
 
 ## Does not work yet
 
-- **Buttons in the card that talk to Claude** (Draft the ask, Save to my drafts). Claude shows "Soft Yes wants to send Claude a message" with Allow once. From the box Allow once did nothing there (tried 12 times, while Allow once for the tools worked). Try it once on your Mac before you go: if Claude takes it, use the buttons. If not, type the sentence.
+- **Draft the ask in the round tracker card** still sends Claude a message when the card can't write it itself. If you see "Soft Yes wants to send Claude a message", press Decline and type the sentence.
+- **The ask from the button has blanks**: [your company] and [what you do]. Typed in the chat, Claude fills them from what it knows about you.
 - **Claude adds its own words.** It reads your memory: in the test it asked "Is this round for Helios One or Minttu?", called Emergence "a US growth fund", and wrote the ask for Helios One. The card is the checked part, the text under it is Claude.
 - **The soft yes from Gmail.** Saving the ask as a Gmail draft works. Starting with no names and letting Claude find the soft yes in your mail is not tested, and your inbox has no mail from Tesi.
 - **Claude phone and desktop apps** are not tested. Use claude.ai in the browser.

@@ -52,3 +52,16 @@ All shots: laptop, Chrome, private window, 1440×900, zoom 100%, bookmarks bar h
 - The rewrite in shot 6 takes about 4 s. It calls Gemini, not Cala.
 - **Never type on camera:** an investor name other than Tesi, Innovestor or Creandum on the home page, or a company other than Lovable or Measur on Page check. A new name starts a live walk: it spends Cala credits and takes much longer (expect about a minute; not timed today).
 - Shot 2 uses Replay the walk on purpose: on the very first walk from the home page the header reads "Reading Tesi's 19 rounds" for half a second while the label under Tesi says 18.
+
+## The Claude sequence (new 14 Nov, 25 s)
+
+Soft Yes now runs inside Claude and draws there. Film this on claude.ai in Chrome and put it in place of shots 2 and 3, or right after shot 1. Steps and what to expect: `CLAUDE_DEMO.md`.
+
+| # | Time | On screen | Voice-over (exact) |
+|---|---|---|---|
+| C1 | 0:00-0:05 | Claude, new chat. Paste: "Tesi and Innovestor said they're in once we have a lead. Use Soft Yes to find who could lead our Series A." Press Allow once. | "Two investors said they'd follow. I ask Claude." |
+| C2 | 0:05-0:15 | The card draws in the chat: Tesi and Innovestor, the rounds they joined, who led, a tick landing on each "led". | "Soft Yes walks Cala's graph and opens the page behind every 'led'. A tick means the page says the same." |
+| C3 | 0:15-0:20 | Lifeline Ventures, its sentence from thenextweb.com, "Tesi opens the door". | "Start with Lifeline. That's the page's own sentence. Tesi was in that round." |
+| C4 | 0:20-0:25 | Tap **Draft the ask to Tesi**. The ask opens in the card with its list of facts. | "And the ask to Tesi, written only from checked facts." |
+
+Before filming: set the Soft Yes tools to "Always allow" so no prompt shows, and use a chat with memory off so Claude adds nothing of its own under the card.
