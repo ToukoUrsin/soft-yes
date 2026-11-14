@@ -20,6 +20,18 @@ function unfounded(description: string): string {
     .replace(/\s+([,.])/g, '$1').replace(/,\s*\./g, '.').trim()
 }
 
+/** Whether the company Cala answered with is the one typed: one name inside the other, or a word of three letters or more in common. */
+function sameName(typed: string, found: string): boolean {
+  const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const a = norm(typed)
+  const b = norm(found)
+  const flat = (t: string) => t.replace(/[^a-z0-9]/g, '')
+  if (!flat(a) || flat(a).includes(flat(b)) || flat(b).includes(flat(a))) return true
+  const words = (t: string) => t.split(/[^a-z0-9]+/).filter((w) => w.length >= 3)
+  const mine = new Set(words(a))
+  return words(b).some((w) => mine.has(w))
+}
+
 function shortHint(description: string): string {
   const words = description.replace(/^(an?|the)\s+/i, '').split(/\s+/).slice(0, 4).map((w) => w.replace(/[,.;:]+$/, ''))
   while (words.length > 1 && DANGLING.test(words[words.length - 1])) words.pop()
@@ -119,6 +131,7 @@ function Answer({ d, onPick }: { d: Result; onPick: (id: string, name: string) =
     <div className="ccheck__answer">
       <div className="ccheck__co">
         <div>
+          {!sameName(d.q, co.name) && <p className="ccheck__near">No exact match for “{d.q}”. Closest name in Cala:</p>}
           <h3>{co.name}</h3>
           {co.description && <p className="truncate">{unfounded(co.description)}</p>}
         </div>

@@ -14,8 +14,8 @@ interface SuggestState {
 
 const EMPTY: SuggestState = { items: [], source: 'none', loading: false, error: null, for: '' }
 
-/** Debounced (250 ms), 2+ characters, stale requests aborted. */
-function useSuggest(query: string): SuggestState {
+/** Debounced (250 ms), 2+ characters, stale requests aborted. `company` asks for companies, not investors. */
+function useSuggest(query: string, company?: boolean): SuggestState {
   const [state, setState] = useState<SuggestState>(EMPTY)
   useEffect(() => {
     const q = query.trim()
@@ -26,7 +26,7 @@ function useSuggest(query: string): SuggestState {
     const ctl = new AbortController()
     setState((s) => ({ ...s, loading: true, error: null }))
     const timer = window.setTimeout(() => {
-      api.suggest(q, ctl.signal).then(
+      (company ? api.companies(q, ctl.signal) : api.suggest(q, ctl.signal)).then(
         (r) => setState({ items: r.items, source: r.source, loading: false, error: null, for: q }),
         (e: Error) => {
           if (e.name === 'AbortError') return
@@ -38,7 +38,7 @@ function useSuggest(query: string): SuggestState {
       clearTimeout(timer)
       ctl.abort()
     }
-  }, [query])
+  }, [query, company])
   return state
 }
 
@@ -55,15 +55,20 @@ function Highlight({ text, q }: { text: string; q: string }) {
 }
 
 function typeLabel(s: Suggestion): string {
+  if (s.kind === 'company') return s.type === 'Organization' ? 'Organisation' : 'Company'
   if (s.type === 'Person' || s.kind === 'person') return 'Person'
   if (s.known_rounds > 0) return 'Investor'
   return s.type === 'Company' ? 'Company' : 'Organisation'
 }
 
-/** The count is of rounds it invested in. A founder's own company is not expected to have any, so that field says nothing. */
+/** For an investor the count is of rounds it invested in. For a company it is the rounds it raised, or its investors. */
 function roundsLabel(s: Suggestion, company?: boolean): string {
-  if (s.known_rounds > 0) return `${company ? 'Invested in ' : ''}${plural(s.known_rounds, 'round')}${company ? '' : ' in Cala'}`
-  return company ? '' : 'No rounds as an investor in Cala'
+  if (company) {
+    if (s.known_rounds > 0) return `${plural(s.known_rounds, 'funding round')} in Cala`
+    return s.investors ? `${plural(s.investors, 'investor')} in Cala` : ''
+  }
+  if (s.known_rounds > 0) return `${plural(s.known_rounds, 'round')} in Cala`
+  return 'No rounds as an investor in Cala'
 }
 
 /** One line a screen reader or an agent can tell two similar names apart by. */
@@ -124,7 +129,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
                   <span className="opt__name truncate"><Highlight text={s.name} q={q} /></span>
                   <span className="opt__type">{typeLabel(s)}</span>
                 </span>
-                <span className={`opt__side num${!off && !s.known_rounds ? ' opt__side--none' : ''}`}>
+                <span className={`opt__side num${!off && !s.known_rounds && !(company && s.investors) ? ' opt__side--none' : ''}`}>
                   {off ? 'Added' : roundsLabel(s, company)}
                   {sure && i === 0 && <kbd className="kbd opt__enter">Enter</kbd>}
                 </span>
@@ -134,7 +139,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
           })}
         </ul>
       ) : fresh && !state.loading ? (
-        <p className="pop__msg">Nothing in Cala matches “{q}”. {emptyHint}</p>
+        <p className="pop__msg" role="status">Nothing in Cala matches “{q}”. {emptyHint}</p>
       ) : (
         <div className="pop__skel" aria-label="Searching">
           <i className="skel" style={{ width: '46%' }} />
@@ -226,7 +231,7 @@ export function TokenField({
 
   const add = (s: Suggestion) => {
     if (taken.has(s.key) || full) return
-    onChange([...tokens, { key: s.key, name: s.name, ids: s.ids, kind: s.kind }])
+    onChange([...tokens, { key: s.key, name: s.name, ids: s.ids, kind: s.kind === 'person' ? 'person' : 'fund' }])
     setQ('')
     input.current?.focus()
   }
@@ -301,7 +306,7 @@ export function SingleField({
   const id = useId()
   const [q, setQ] = useState('')
   const [focus, setFocus] = useState(false)
-  const state = useSuggest(q)
+  const state = useSuggest(q, company)
   const open = focus && q.trim().length >= 2
   const { active, setActive, onKey } = useListNav(state.items.length, open, state.for)
   const pick = (s: Suggestion) => { setQ(''); onPick(s) }

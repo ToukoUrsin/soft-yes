@@ -115,6 +115,15 @@ export function layout(model: GraphModel, d: Dims): Layout {
 
   // Leads: in ranked order beside the rounds they led once settled, in order of appearance while the walk runs.
   const leads = [...model.leads]
+  // On a phone a soft yes's name runs across the lead column, so a lead steps below that row. The graph grows by
+  // the step when the column has no slack left.
+  const heads = d.stacked ? model.softs.map((s) => y[`s:${s.key}`]) : []
+  const band = (d.headH + d.rowH) / 2
+  const below = (at: number) => {
+    const head = heads.find((h) => Math.abs(at - h) < band)
+    return head == null ? at : head + band
+  }
+  const pos: number[] = []
   if (model.settled) {
     const centre = (rounds: string[]) => {
       const ys = rounds.map((id) => y[`r:${id}`]).filter((v) => v != null)
@@ -123,25 +132,30 @@ export function layout(model: GraphModel, d: Dims): Layout {
     const want = new Map(leads.map((l) => [l.key, centre(l.rounds)]))
     // The column reads top to bottom as the ranking does; each lead still sits as near its rounds as that order allows.
     leads.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999) || want.get(a.key)! - want.get(b.key)!)
-    const pos: number[] = []
     leads.forEach((l, i) => {
-      // on a phone the first row is a soft yes's name, which runs across the lead column
       pos[i] = Math.max(want.get(l.key)!, i ? pos[i - 1] + d.rowH : d.padY + d.headH + d.rowH / 2)
     })
     const floor = Math.max(roundsBottom, d.padY + d.headH + leads.length * d.rowH) - d.rowH / 2
     for (let i = leads.length - 1; i >= 0; i--) {
       pos[i] = Math.min(pos[i], i === leads.length - 1 ? floor : pos[i + 1] - d.rowH)
     }
-    leads.forEach((l, i) => {
-      y[`l:${l.key}`] = pos[i]
-    })
+    // On a phone the column is the ranking, read as a list: no gaps, one lead a row.
+    if (heads.length) {
+      leads.forEach((_, i) => {
+        pos[i] = below(i ? pos[i - 1] + d.rowH : d.padY + d.headH + d.rowH / 2)
+      })
+    }
   } else {
     leads.sort((a, b) => a.seq - b.seq)
-    leads.forEach((l, i) => {
-      y[`l:${l.key}`] = d.padY + d.headH + i * d.rowH + d.rowH / 2
+    leads.forEach((_, i) => {
+      pos[i] = below(i ? pos[i - 1] + d.rowH : d.padY + d.headH + d.rowH / 2)
     })
   }
-  const height = Math.max(roundsBottom, d.padY + d.headH + leads.length * d.rowH) + d.padY
+  leads.forEach((l, i) => {
+    y[`l:${l.key}`] = pos[i]
+  })
+  const leadsBottom = leads.length ? pos[leads.length - 1] + d.rowH / 2 : 0
+  const height = Math.max(roundsBottom, leadsBottom) + d.padY
   return { y, height }
 }
 

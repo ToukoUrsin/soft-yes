@@ -68,10 +68,10 @@ Cala knows what a fund did. It does not know what the fund says about itself. Ox
 
 ## Gemini
 
-`gemini-3.8-flash` has two jobs, and code checks both.
+Gemini has two jobs, and code checks both.
 
-- It writes the intro request from a fact sheet. Code drops a draft that contains a name or a number that is not in those facts, and the page says so. After two failed tries a plain template is used and no model is involved.
-- It points at sentences on a fund's site. Code keeps a sentence only when it is on the page word for word.
+- `gemini-4-hydrogen` writes the intro request from a fact sheet while you wait. Code drops a draft that contains a name or a number that is not in those facts, and the page says so. After two failed tries a plain template is used and no model is involved.
+- `gemini-4-carbon` points at sentences on a fund's site, where nobody waits. Code keeps a sentence only when it is on the page word for word.
 
 No model picks, ranks or checks a lead.
 

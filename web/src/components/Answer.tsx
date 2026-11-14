@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import type { Evidence, Lead, Result, SaysLine } from '../lib/api'
 import { fmtMonth, listAnd } from '../lib/format'
-import { CheckLabel, CheckNote, PageLink, Quote } from './Evidence'
+import { CheckLabel, CheckNote, ClaimStrip, PageLink, Quote } from './Evidence'
 import { SaysRow, type Tab } from './Leads'
 import { DraftPane, useRunFounder } from './Tools'
 import { Icon, Sources } from './ui'
@@ -98,11 +98,14 @@ export function Answer({
         )}
         {wrong > 0 && (
           <p className="answer__cut">
-            Cala has it leading <b className="num">{lead.evidence.length + wrong}</b> rounds your investors joined. The pages confirm{' '}
-            <b className="num">{held}</b> and name another lead for <b className="num">{wrong}</b>.
+            <ClaimStrip confirmed={held} corrected={wrong} open={lead.evidence.length - held} max={24} />
+            <span>
+              Cala has it leading <b className="num">{lead.evidence.length + wrong}</b> rounds your investors joined. The pages confirm{' '}
+              <b className="num">{held}</b> and name another lead for <b className="num answer__cutfix">{wrong}</b>.
+            </span>
           </p>
         )}
-        {says && <SaysRow lead={lead} says={says} />}
+        {says && <SaysRow lead={lead} says={says} full />}
         <button type="button" className="answer__more" onClick={() => onOpen('record')}>
           Its record
           <Icon name="arrow" size={13} />

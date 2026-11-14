@@ -180,12 +180,14 @@ LEADS_AFTER = re.compile(
     r"^(?:\s*\([^)]{0,50}\))?,?\s*(?<![\w-])(?:(?:has|have|had|also|again|is|are|was|were|will|which|who|that|today|now)\s+){0,3}"
     r"(?:(?:thrilled|proud|excited|delighted|pleased|happy|honou?red)\s+(?=to\s+(?:have\s+|be\s+)?(?:co-?)?(?:led|lead|leading)\b))?"
     r"(?:to have (?:co-?)?led|to be (?:co-?)?leading|to (?:co-?)lead|(?:co-?)?led|(?:co-?)?leads|(?:co-?)?leading|to lead|will lead|lead(?= (?:the|a|an|its|this|that|\S+['’]s))|spearheaded|spearheads|anchored|"
-    r"as (?:the |a )?(?:sole |co-?)?lead(?: investor)?|\((?:co-?)?lead(?: investor)?\)|johtaa|johti|toimi(?:i)? pääsijoittajana|"
+    r"as (?:the |a )?(?:sole |co-?)?leads?(?: investors?)?|\((?:co-?)?lead(?: investor)?\)|johtaa|johti|toimi(?:i)? pääsijoittajana|"
     r"führt|führte|lidera|lideró|mène|a mené)(?![\w-])", re.I)
 # Where the list of leaders ends and the rest of the syndicate begins.
 STOP = re.compile(
     r"(?<![\w-])(?:with participation|participation from|participation by|with (?:additional |further |strong )?(?:support|backing|investments?|contributions?)|as well as|in addition to|"
     r"joined by|and joined|alongside|along with|together with|followed by|including|included|includes|"
+    r"(?:and\s+|,\s*)?(?:supported|backed|accompanied|complemented|rounded out|topped up|bolstered|joined) by|"
+    r"with (?:the )?(?:support|backing|participation|involvement) (?:of|from)|saw participation|"
     r"other investors|also participat\w+|additional investment|while|whereas|mukana|osallistui\w*|lisäksi|sekä kierrokseen|"
     r"beteiligt\w*|unter beteiligung|con la participación|avec la participation|aux côtés|med deltagande)(?![\w-])"
     r"|,?\s+with\b|,\s*(?:and\s+)?existing investors?\b|[;:!?]", re.I)
@@ -197,9 +199,19 @@ JOINING = re.compile(r"(?<![\w-])(?:participat\w+|joined|joins|joining|to join|i
 LIST_LEADS = re.compile(
     r"^(?:\s*\([^)]{0,50}\))?(?:\s*,\s*(?:the\s+)?[A-Z0-9][^,.;:()]{1,60}?(?:\s*\([^)]{0,50}\))?){0,4}\s*,?\s+(?:and|&|ja|und|et|e|y|och|og)\s+"
     r"(?:the\s+)?[A-Z0-9][^,.;:]{1,70}?\s+(?:(?:have|has|had|jointly|together|both|all)\s+){0,2}"
-    r"(?:co-?led|co-?lead|led|lead|are leading|are co-?leading|johtivat)(?![\w-])")
+    r"(?:co-?led|co-?lead|led|lead|are leading|are co-?leading|johtivat|as (?:the )?(?:co-?)?leads?(?: investors?)?)(?![\w-])")
 
 
+# After the name: it is the subject of a joining verb, alone or in a list ("led by A, and B joined", "led by A. B, C and D participated").
+JOINS_AFTER = re.compile(
+    r"^(?:\s+[A-Z][\w&.'’-]*){0,3}(?:\s*\([^)]{0,50}\))?(?:\s*,\s*(?:the\s+)?[A-Z0-9][^,.;:()]{1,60}?(?:\s*\([^)]{0,50}\))?){0,5}"
+    r"(?:\s*,?\s+(?:and|&|as well as|ja|und|et|y|och|og)\s+(?:the\s+)?[A-Z0-9][^,.;:]{1,70}?)?\s*,?\s+"
+    r"(?i:(?:(?:have|has|had|also|both|all|each|will|is|are|was|were|again)\s+){0,3}"
+    r"(?:participat(?:ed|es|e|ing)|joined|joins|joining|invested|invests|investing|took part|followed|came in|contributed|supported|backed|"
+    r"osallistui\w*|beteiligten sich))(?![\w-])(?!\s+(?:by|von|av|af)\b)")
+
+
+AS_LEAD = re.compile(r"(?<![\w-])as\s+(?:(?:the|a|an|its|their|sole)\s+)?(?:[\w-]+\s+){0,2}$", re.I)
 INVESTORS_SUCH_AS = re.compile(r"^\s*(?:its\s+|the\s+)?(?:existing|new|returning|current|previous)\s+investors?,?\s+(?:including|such as|like)\s+", re.I)
 
 
@@ -213,7 +225,11 @@ def _says_led(sent: str, at: int, end: int) -> bool:
     m = LIST_LEADS.match(sent[end:end + 260])
     if m and not PASSIVE.match(sent[end + m.end():]) and not STOP.search(m.group()) and not JOINING.search(m.group()):
         return True
+    if JOINS_AFTER.match(sent[end:end + 260]):   # "led by A, and B joined": B is named after the leading word, as one who joined
+        return False
     for m in LED_BY.finditer(sent[:at]):
+        if "investor" in m.group().lower() and AS_LEAD.search(sent[:m.start()]):
+            continue   # "A as the German lead investor, B and C": the word belongs to A, before it
         seg = INVESTORS_SUCH_AS.sub(" ", sent[m.end():at])   # "led by existing investors including A, B"
         if not STOP.search(seg) and at - m.end() < 220:
             return True
@@ -225,6 +241,8 @@ def _says_followed(sent: str, at: int, end: int) -> bool:
     for m in LEAD_WORDS.finditer(sent[:at]):
         if STOP.search(sent[m.end():at]):
             return True
+    if LEAD_WORDS.search(sent[:at]) and JOINS_AFTER.match(sent[end:end + 260]):   # 'A led the round, and B participated'
+        return True
     rest = sent[end:end + 160]   # 'B joined the round led by A'
     m = JOINING.search(rest)
     return bool(m and LED_BY.search(rest[m.end():]))
@@ -315,7 +333,11 @@ def _trim(sent: str, at: int) -> str:
         if a:
             sp = sent.find(" ", a, at)   # cut between words, never inside one
             a = sp + 1 if sp >= 0 else a
-        b = a + 320
+        # the word that makes it a lead claim stays in the quote, even when it sits far before the name
+        said = [m.start() for m in LED_BY.finditer(sent[:at]) if at - m.end() < 220]
+        if said and said[-1] < a:
+            a = said[-1]
+        b = max(a + 320, min(len(sent), at + 110))
         if b < len(sent):
             sp = sent.rfind(" ", a, b)
             b = sp if sp > at else b
@@ -333,6 +355,7 @@ def company_key(company: str) -> str:
     return re.sub(r"\.(io|ai|com|fi|vc|co|app)$", "", re.sub(r"\s+(oy|oyj|ab|ltd|inc|gmbh|as|sas|bv)\.?$", "", company.strip(), flags=re.I), flags=re.I)
 
 
+TAILS = ("labs", "ai", "hq", "app", "tech", "health", "technologies")
 COMMON_FIRST = {"the", "nord", "nordic", "open", "first", "new", "blue", "green", "smart", "digital", "global", "north", "data"}
 
 
@@ -344,7 +367,10 @@ def company_keys(company: str) -> list[str]:
     if len(first) >= 5 and first.lower() not in COMMON_FIRST:
         out.append(first)
     if len(key) >= 4 and " " not in key.strip():   # 'Measur' is 'Measurlabs' on its own blog, 'Verda' is 'Verda AI'
-        out += [f"{key} {tail}" for tail in ("labs", "ai", "hq", "app", "tech", "health", "technologies")]
+        out += [f"{key} {tail}" for tail in TAILS]
+    bare = re.sub(rf"\s+(?:{'|'.join(TAILS)})$", "", key, flags=re.I)   # and the other way: 'Cala AI' is 'Cala' in the press
+    if bare != key and len(bare) >= 4 and bare.lower() not in COMMON_FIRST:
+        out.append(bare)
     return list(dict.fromkeys(out))
 
 

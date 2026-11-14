@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'wouter'
-import { api, investorHref, type Audit, type Company, type Config, type Example, type SoftInput, type StageId } from '../lib/api'
+import { api, investorHref, type Audit, type Company, type CompanyRef, type Config, type Example, type SoftInput, type StageId } from '../lib/api'
 import { isMac, listAnd, plural } from '../lib/format'
 import { recentRuns, useConfig, useSessionState, useTask } from '../lib/store'
 import { walkStore } from '../lib/walk'
 import { SingleField, TokenField, type Token } from '../components/Pickers'
 import { CopyButton, Icon, Segmented } from '../components/ui'
 
-function useExamples(): Example[] | null {
-  const [examples, set] = useState<Example[] | null>(null)
+interface Examples { examples: Example[]; real: Example[] }
+
+function useExamples(): Examples | null {
+  const [examples, set] = useState<Examples | null>(null)
   useEffect(() => {
     let live = true
     api.examples().then(
-      (r) => live && set(r.examples),
-      () => live && set([]),
+      (r) => live && set({ examples: r.examples, real: r.real ?? [] }),
+      () => live && set({ examples: [], real: [] }),
     )
     return () => {
       live = false
@@ -120,7 +122,7 @@ function Recent() {
   )
 }
 
-function start(soft: SoftInput[], stage: StageId | null, company: { id: string; name: string } | null, navigate: (to: string) => void) {
+function start(soft: SoftInput[], stage: StageId | null, company: CompanyRef | null, navigate: (to: string) => void) {
   void walkStore.start({ soft_yeses: soft, stage, company })
   navigate('/r/live')
 }
@@ -131,7 +133,9 @@ function SoftYesAsk({ config }: { config: Config | null }) {
   const [, navigate] = useLocation()
   const [tokens, setTokens] = useSessionState<Token[]>('softyes:tokens', [])
   const [stage, setStage] = useSessionState<StageId | 'ANY'>('softyes:stage', 'ANY')
-  const [company, setCompany] = useSessionState<{ id: string; name: string } | null>('softyes:company', null)
+  const [company, setCompany] = useSessionState<CompanyRef | null>('softyes:company', null)
+  // Whose investors the form was filled from, so a trip to the result and back does not fill it twice.
+  const [filled, setFilled] = useSessionState<string | null>('softyes:filled', null)
   const examples = useExamples()
   const co = useTask<Company>()
   const loaded = useRef<string | null>(null)
@@ -139,10 +143,33 @@ function SoftYesAsk({ config }: { config: Config | null }) {
   useEffect(() => {
     if (!company || loaded.current === company.id) return
     loaded.current = company.id
-    co.run((signal) => api.company(company.id, signal))
+    // Reading the company also starts its walk on the server, so the answer is close when it is asked for.
+    co.run((signal) => api.company(company.ids?.length ? company.ids : company.id, signal))
     // one read per company picked
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company?.id])
+
+  const data = co.data && company && (co.data.id === company.id || company.ids?.includes(co.data.id)) ? co.data : null
+  const stages = [{ id: 'ANY' as const, name: 'Any stage' }, ...(config?.stages ?? [])]
+
+  // The company's own investors start the walk: the founder takes out anyone who will not follow.
+  useEffect(() => {
+    if (!data || !company || filled === company.id) return
+    setFilled(company.id)
+    const softs = new Set(data.softs ?? [])
+    const mine = data.investors.filter((i) => softs.has(i.key)).map((i) => ({ key: i.key, name: i.name, ids: i.ids, kind: i.kind }))
+    if (mine.length && !tokens.length) setTokens(mine)
+    if (stage === 'ANY' && data.next_stage && config?.stages.some((s) => s.id === data.next_stage)) setStage(data.next_stage as StageId)
+    // once per company
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, company?.id])
+
+  const clear = () => {
+    setCompany(null)
+    setFilled(null)
+    loaded.current = null
+    co.reset()
+  }
 
   const submit = () => {
     if (!tokens.length) return
@@ -150,7 +177,7 @@ function SoftYesAsk({ config }: { config: Config | null }) {
     // The walk has what it needs. Coming back to this page starts from an empty form.
     setTokens([])
     setStage('ANY')
-    setCompany(null)
+    clear()
   }
   const submitRef = useRef(submit)
   submitRef.current = submit
@@ -165,9 +192,14 @@ function SoftYesAsk({ config }: { config: Config | null }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const stages = [{ id: 'ANY' as const, name: 'Any stage' }, ...(config?.stages ?? [])]
   const taken = new Set(tokens.map((t) => t.key))
-  const investors = co.data && company && co.data.id === company.id ? co.data.investors : null
+  const rest = data ? data.investors.filter((i) => !taken.has(i.key)) : []
+  const fromCompany = !!data && !!company && filled === company.id && tokens.some((t) => data.investors.some((i) => i.key === t.key))
+  const stageNow = data?.stage ? config?.stages.find((s) => s.id === data.stage)?.name ?? null : null
+  const fact = data
+    ? [stageNow, data.hq?.split(',').slice(-2).join(',').trim() || null, data.investors.length ? plural(data.investors.length, 'investor') + ' in Cala' : null]
+        .filter(Boolean).join(' · ')
+    : ''
 
   return (
     <main className="page home">
@@ -178,8 +210,8 @@ function SoftYesAsk({ config }: { config: Config | null }) {
           If you find a lead.
         </h1>
         <p className="home__lede">
-          Name the investors who will follow. Soft Yes walks Cala’s funding graph from them to the investors who led the rounds
-          they joined, and checks which of those still lead.
+          Type your company. Soft Yes starts from the investors you already have, walks Cala’s funding graph to the investors who
+          led the rounds they joined, and checks which of those still lead.
         </p>
         <CreditNote config={config} />
 
@@ -191,34 +223,17 @@ function SoftYesAsk({ config }: { config: Config | null }) {
           }}
         >
           <div className="field">
-            <span className="field-label">Who said they’d follow?</span>
-            <TokenField tokens={tokens} onChange={setTokens} label="Who said they’d follow?" placeholder="Type an investor’s name" autoFocus />
-            {tokens.length === 1 && (
-              <p className="field-hint">
-                Have a second one? Add it. On past rounds, two followers found the real lead far more often than one.{' '}
-                <Link href="/audit#backtest">See the test</Link>
-              </p>
-            )}
-          </div>
-
-          <div className="field">
-            <span className="field-label">
-              Stage you are raising <small>optional</small>
-            </span>
-            <Segmented options={stages} value={stage} onChange={setStage} label="Stage you are raising" />
-          </div>
-
-          <div className="field">
-            <span className="field-label">
-              Your company <small>optional, to check leads for competitors</small>
-            </span>
+            <span className="field-label">Your company</span>
             {company ? (
               <div className="company">
-                <span className="token token--plain">
-                  <span className="truncate" title={company.name}>{company.name}</span>
-                  <button type="button" aria-label={`Remove ${company.name}`} onClick={() => { setCompany(null); loaded.current = null; co.reset() }}>
-                    <Icon name="x" size={12} />
-                  </button>
+                <span className="company__head">
+                  <span className="token token--plain">
+                    <span className="truncate" title={company.name}>{company.name}</span>
+                    <button type="button" aria-label={`Remove ${company.name}`} onClick={clear}>
+                      <Icon name="x" size={12} />
+                    </button>
+                  </span>
+                  {fact && <span className="company__fact">{fact}</span>}
                 </span>
                 {co.status === 'loading' && (
                   <span className="company__row" aria-label="Reading its investors in Cala">
@@ -228,29 +243,25 @@ function SoftYesAsk({ config }: { config: Config | null }) {
                   </span>
                 )}
                 {co.status === 'error' && <span className="faint">Cala could not open it: {co.error}</span>}
-                {investors && investors.length === 0 && <span className="faint">Cala lists no investors for {company.name}.</span>}
-                {investors && investors.length > 0 && (
+                {data && data.investors.length === 0 && (
+                  <span className="faint">Cala lists no investors for {company.name} yet. Name the ones who said yes below.</span>
+                )}
+                {rest.length > 0 && (
                   <div className="company__inv">
-                    <span className="faint">Its investors in Cala. Add the ones who said yes:</span>
+                    <span className="faint">Also in {company.name}, by Cala’s record. Add anyone who said yes:</span>
                     <span className="company__row">
-                      {investors.slice(0, 14).map((i) => {
-                        const on = taken.has(i.key)
-                        return (
-                          <button
-                            key={i.key}
-                            type="button"
-                            className="chip"
-                            aria-pressed={on}
-                            disabled={!on && tokens.length >= 6}
-                            onClick={() =>
-                              setTokens(on ? tokens.filter((t) => t.key !== i.key) : [...tokens, { key: i.key, name: i.name, ids: i.ids, kind: i.kind }])
-                            }
-                          >
-                            <Icon name={on ? 'check' : 'plus'} size={12} />
-                            <span className="truncate">{i.name}</span>
-                          </button>
-                        )
-                      })}
+                      {rest.slice(0, 12).map((i) => (
+                        <button
+                          key={i.key}
+                          type="button"
+                          className="chip"
+                          disabled={tokens.length >= 6}
+                          onClick={() => setTokens([...tokens, { key: i.key, name: i.name, ids: i.ids, kind: i.kind }])}
+                        >
+                          <Icon name="plus" size={12} />
+                          <span className="truncate">{i.name}</span>
+                        </button>
+                      ))}
                     </span>
                   </div>
                 )}
@@ -259,11 +270,37 @@ function SoftYesAsk({ config }: { config: Config | null }) {
               <SingleField
                 label="Your company"
                 company
-                placeholder="Find your company in Cala"
-                emptyHint="You can leave this empty."
-                onPick={(s) => setCompany({ id: s.ids[0], name: s.name })}
+                large
+                autoFocus
+                placeholder="Type your company’s name"
+                emptyHint="Not in Cala yet? Name your investors below."
+                onPick={(s) => setCompany({ id: s.ids[0], name: s.name, ids: s.ids })}
               />
             )}
+          </div>
+
+          <div className="field">
+            <span className="field-label">
+              Who said they’d follow?{!company && <small>or start here, without a company</small>}
+            </span>
+            <TokenField tokens={tokens} onChange={setTokens} label="Who said they’d follow?" placeholder="Type an investor’s name" />
+            <div className="field-hint" data-on={fromCompany || tokens.length === 1 || undefined} aria-hidden={!(fromCompany || tokens.length === 1)}>
+              {fromCompany && company ? (
+                <p>Your investors in Cala. Take out anyone who won’t follow this time.</p>
+              ) : (
+                <p>
+                  Have a second one? Add it. On past rounds, two followers found the real lead far more often than one.{' '}
+                  <Link href="/audit#backtest" tabIndex={tokens.length === 1 ? undefined : -1}>See the test</Link>
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="field">
+            <span className="field-label">
+              Stage you are raising <small>{fromCompany && stageNow && stage !== 'ANY' ? `the round after your ${stageNow.toLowerCase()}` : 'optional'}</small>
+            </span>
+            <Segmented options={stages} value={stage} onChange={setStage} label="Stage you are raising" />
           </div>
 
           <div className="home__go">
@@ -275,34 +312,61 @@ function SoftYesAsk({ config }: { config: Config | null }) {
               </span>
             </button>
             <span className="faint">
-              {tokens.length ? `Walks every round ${listAnd(tokens.map((t) => t.name))} joined in Cala` : 'Add at least one investor to start'}
+              {tokens.length
+                ? `Walks every round ${listAnd(tokens.map((t) => t.name))} joined in Cala`
+                : company && co.status === 'loading' ? 'Reading its investors in Cala' : 'Pick your company or add an investor to start'}
             </span>
           </div>
         </form>
 
-        <section className="home__list" aria-label="Examples">
-          <h2>Or start from one of these</h2>
-          {examples === null ? (
+        {examples === null ? (
+          <section className="home__list" aria-label="Examples">
+            <h2>Or open a real one</h2>
             <div className="home__skel">
               <i className="skel" style={{ height: 40 }} />
               <i className="skel" style={{ height: 40 }} />
             </div>
-          ) : examples.length === 0 ? (
-            <p className="faint">The examples could not be loaded. Type an investor’s name above.</p>
-          ) : (
-            <ul>
-              {examples.map((ex) => (
-                <li key={ex.id}>
-                  <button type="button" className="pick" onClick={() => start(ex.soft_yeses, ex.stage, null, navigate)}>
-                    <span className="pick__name truncate">{ex.title}</span>
-                    <span className="pick__blurb truncate">{ex.blurb}</span>
-                    <Icon name="arrow" size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+          </section>
+        ) : (
+          <>
+            {examples.real.length > 0 && (
+              <section className="home__list" aria-label="Real companies">
+                <h2>Or open a real one, from the investors Cala lists in it</h2>
+                <ul>
+                  {examples.real.map((ex) => (
+                    <li key={ex.id}>
+                      <button type="button" className="pick" onClick={() => start(ex.soft_yeses, ex.stage, ex.company ?? null, navigate)}>
+                        <span className="pick__name truncate">{ex.title}</span>
+                        <span className="pick__blurb truncate">
+                          {[ex.stage ? config?.stages.find((st) => st.id === ex.stage)?.name : null, ex.blurb].filter(Boolean).join('. ')}
+                        </span>
+                        <Icon name="arrow" size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <section className="home__list" aria-label="Examples">
+              <h2>{examples.real.length > 0 ? 'Or from two investors who said yes' : 'Or start from one of these'}</h2>
+              {examples.examples.length === 0 ? (
+                <p className="faint">The examples could not be loaded. Type an investor’s name above.</p>
+              ) : (
+                <ul>
+                  {examples.examples.map((ex) => (
+                    <li key={ex.id}>
+                      <button type="button" className="pick" onClick={() => start(ex.soft_yeses, ex.stage, null, navigate)}>
+                        <span className="pick__name truncate">{ex.title}</span>
+                        <span className="pick__blurb truncate">{ex.blurb}</span>
+                        <Icon name="arrow" size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
 
         <Recent />
       </div>
@@ -333,7 +397,7 @@ function InvestorAsk({ config, findHref }: { config: Config | null; findHref: st
   const [, navigate] = useLocation()
   const examples = useExamples()
   const known = new Map<string, SoftInput>()
-  for (const ex of examples ?? []) for (const s of ex.soft_yeses) known.set(s.name, s)
+  for (const ex of examples?.examples ?? []) for (const s of ex.soft_yeses) known.set(s.name, s)
   return (
     <main className="page home home--check">
       <div className="home__main">
@@ -384,8 +448,22 @@ function InvestorAsk({ config, findHref }: { config: Config | null; findHref: st
   )
 }
 
+/** `/?fresh=1` opens the page as a first visitor sees it: no half-filled form, no recent walks, no saved pitch. */
+function startFresh() {
+  if (typeof location === 'undefined' || !new URLSearchParams(location.search).has('fresh')) return
+  try {
+    for (const store of [sessionStorage, localStorage]) {
+      for (const key of Object.keys(store)) if (key.startsWith('softyes:')) store.removeItem(key)
+    }
+  } catch {
+    // storage is off: there is nothing to clear
+  }
+  history.replaceState(null, '', location.pathname)
+}
+
 /** `mode` is set by the route; without it the deployment's framing decides what the front page asks. */
 export function Home({ mode }: { mode?: 'find' | 'check' }) {
+  useState(startFresh)
   const config = useConfig()
   const [waited, setWaited] = useState(false)
   useEffect(() => {

@@ -174,7 +174,7 @@ export function InvestorPage() {
           </p>
         )}
 
-        {none ? (
+        {none && reading ? null : none ? (
           <div className="state">
             <strong>Cala has no funding rounds for {s.name}.</strong>
             <span>That is a gap in what Cala covers, not a verdict on the investor. Try its full legal name, or the fund rather than the firm.</span>

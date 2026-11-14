@@ -336,16 +336,20 @@
   line-height: 18px;
 }
 
-/* one line: the name gives way, the round count always shows */
+/* one line: the name always shows, the round count gives way */
 .graph--compact .gl--soft .gl__name {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  max-width: 100%;
   font-size: var(--fs-s);
 }
 
 .graph--compact .gl--soft .gl__sub {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: none;
+  /* edges to the leads pass behind the heading, not through its words */
+  background: var(--bg);
+  box-shadow: 0 0 0 4px var(--bg);
 }
 
 /* Rows shrunk so the whole walk fits the screen. */

@@ -81,6 +81,21 @@
   color: var(--text-3);
 }
 
+/* the company shown is not the name typed: said before the name, in the one warning colour */
+.ccheck__co .ccheck__near {
+  margin: 0 0 6px;
+  color: var(--warn);
+}
+
+/* a description runs to two lines before it is cut, not one */
+.ccheck__co h3 + p.truncate {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+}
+
 .ccheck__others {
   display: inline-flex;
   flex-wrap: wrap;

@@ -142,23 +142,24 @@ function More<T>({ rows, first, render }: { rows: T[]; first: number; render: (r
 const pct = (n: number, of: number) => `${Math.round((100 * n) / Math.max(1, of))}%`
 const nth = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`
 
-// Both rows share one scale, so a longer bar is a higher rate.
+// Both rows share one scale, so a longer bar is a higher rate. Each line reads as a row of a table: rate, what, bar.
 function TestRow({ label, part, full }: { label: string; part: BacktestPart; full: number }) {
   const rate = part.hit / Math.max(1, part.tested)
   const base = part.base_rate ?? 0
+  const width = (r: number) => ({ width: `${Math.min(100, (100 * r) / full)}%` })
   return (
     <div className="bt__row">
       <dt>{label}</dt>
       <dd>
-        <span className="bt__line">
-          <i className="bt__bar is-walk" style={{ width: `${(55 * rate) / full}%` }} />
-          <span className="num">
-            <b>{pct(part.hit, part.tested)}</b> <span className="faint">{part.hit} of {part.tested}</span>
-          </span>
+        <span className="bt__line is-walk">
+          <b className="num">{pct(part.hit, part.tested)}</b>
+          <span className="bt__note num">{part.hit} of {part.tested}</span>
+          <span className="bt__track" aria-hidden="true"><i style={width(rate)} /></span>
         </span>
         <span className="bt__line">
-          <i className="bt__bar" style={{ width: `${(55 * base) / full}%` }} />
-          <span className="num faint">{Math.round(100 * base)}% a lead picked at random</span>
+          <span className="num">{Math.round(100 * base)}%</span>
+          <span className="bt__note">a lead picked at random</span>
+          <span className="bt__track" aria-hidden="true"><i style={width(base)} /></span>
         </span>
       </dd>
     </div>
@@ -191,44 +192,47 @@ function Tested() {
           </p>
         </div>
       </div>
-      <dl className="bt__rows">
-        <TestRow label="Walked from two followers" part={b.two} full={full} />
-        <TestRow label="Walked from one" part={b.one} full={full} />
-      </dl>
-      <p className="bt__read">
-        {lift ? <>From two followers the real lead is on the list {lift} times as often as chance. </> : null}
-        From one it is no better than chance, so give it two. The order inside the list is not a forecast: the real lead was
-        in the top five in {b.top5} of {b.tested}. Read the list as people your investors can open a door to.
-      </p>
-      {b.examples.length > 0 && (
-        <ul className="bt__cases">
-          {b.examples.map((e) => (
-            <li key={`${e.company}:${e.date}`}>
-              <span className="bt__case">
-                <b>{e.company}</b> <span className="faint">{e.stage_name}, {fmtMonth(e.date)}</span>
-              </span>
-              <span>
-                Led by {e.lead}. Walked from {e.followers.join(' and ')} with that day and everything after hidden:{' '}
-                {e.rank ? (
-                  <>
-                    {e.lead} was <b className="num">{nth(e.rank)} of {e.list_size}</b>
-                    {e.earlier ? <>, through {e.earlier.company} ({fmtMonth(e.earlier.date)}).</> : '.'}
-                  </>
-                ) : (
-                  <>
-                    <b>not among the {e.list_size} names</b>. A miss.
-                  </>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="faint bt__limits">
-        All {b.tested} rounds: on the list in {b.hit} ({pct(b.hit, b.tested)}), against {Math.round(100 * (b.base_rate ?? 0))}% for a random lead
-        from the same year. A small sample, and the test saw only each investor’s 20 latest rounds with the later ones hidden,
-        so a live walk has more to go on.
-      </p>
+      <div className="bt__grid">
+        <dl className="bt__rows">
+          <TestRow label="Walked from two followers" part={b.two} full={full} />
+          <TestRow label="Walked from one" part={b.one} full={full} />
+        </dl>
+        <p className="bt__read">
+          {lift ? <>From two followers the real lead is on the list <b className="num">{lift} times</b> as often as chance. </> : null}
+          From one it is no better than chance, so give it two. The order inside the list is not a forecast: the real lead was
+          in the top five in {b.top5} of {b.tested}. Read the list as people your investors can open a door to.
+        </p>
+        {b.examples.length > 0 && (
+          <ul className="bt__cases">
+            {b.examples.map((e) => (
+              <li key={`${e.company}:${e.date}`} className={e.rank ? 'is-hit' : 'is-miss'}>
+                <i aria-hidden="true" />
+                <p className="bt__case">
+                  <b>{e.company}</b> <span className="faint">{e.stage_name}, {fmtMonth(e.date)}</span>
+                </p>
+                <p>
+                  Led by {e.lead}. Walked from {e.followers.join(' and ')} with that day and everything after hidden:{' '}
+                  {e.rank ? (
+                    <>
+                      {e.lead} was <b className="num">{nth(e.rank)} of {e.list_size}</b>
+                      {e.earlier ? <>, through {e.earlier.company} ({fmtMonth(e.earlier.date)}).</> : '.'}
+                    </>
+                  ) : (
+                    <>
+                      <b>not among the {e.list_size} names</b>. A miss.
+                    </>
+                  )}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="faint bt__limits">
+          All {b.tested} rounds: on the list in {b.hit} ({pct(b.hit, b.tested)}), against {Math.round(100 * (b.base_rate ?? 0))}% for a random lead
+          from the same year. A small sample, and the test saw only each investor’s 20 latest rounds with the later ones hidden,
+          so a live walk has more to go on.
+        </p>
+      </div>
     </section>
   )
 }

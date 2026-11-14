@@ -42,7 +42,17 @@ EXAMPLES = [
      "stage": "SEED"},
 ]
 
+# Real companies, walked from the investors Cala lists in them. `ids`: the Cala entities the company is held under.
+REAL = [
+    {"id": "cala", "ids": ["81cfdabc-53f7-426a-b358-a942e159ca0f", "2bdea5e8-a630-4098-9fb1-3f84bbaa77a2"]},
+    {"id": "context", "ids": ["d6caeb7d-27ca-4967-b7f3-86b207310fa0"]},
+    {"id": "flow", "ids": ["f1970456-a6e4-4b95-91a8-58c5a92d9bfe"]},
+    {"id": "verda", "ids": ["3d3edba6-f4d7-432b-80d3-d07872e11def"]},
+    {"id": "afterquery", "ids": ["f50e8c58-4d32-4395-978b-5f0be8cfa7d8"]},
+]
+
 INDEX: dict[str, dict] = {}   # norm(name) -> {key, name, ids, kind, type, description, rounds}
+ISSUERS: dict[str, dict] = {}   # company id -> {id, name, rounds}: companies Cala holds a funding round for
 
 
 def _index_add(uid: str, name: str, etype: str | None, description: str | None = None, rounds: int = 0) -> None:
@@ -74,6 +84,20 @@ def _index_response(url: str, body, resp: dict) -> None:
         for x in ((resp.get("relationships") or {}).get("incoming") or {}).get("PARTICIPATES_IN_FUNDING_ROUND", []):
             if (x.get("properties") or {}).get("role") in (None, "INVESTOR"):
                 _index_add(x["id"], x["name"], x.get("entity_type"), None, 1)
+            elif (x.get("properties") or {}).get("role") == "ISSUER" and x.get("id") and x.get("name"):
+                co = ISSUERS.setdefault(x["id"], {"id": x["id"], "name": graph.pretty(x["name"]), "rounds": set(),
+                                                  "description": x.get("description")})
+                co["rounds"].add(resp.get("id") or url)
+    elif body == graph.COMPANY_BODY and resp.get("id") and resp.get("name"):
+        inv = ((resp.get("relationships") or {}).get("incoming") or {}).get("INVESTED_IN", [])
+        out = ((resp.get("relationships") or {}).get("outgoing") or {}).get("PARTICIPATES_IN_FUNDING_ROUND", [])
+        if inv or out:   # a company read before, with investors or rounds on record
+            co = ISSUERS.setdefault(resp["id"], {"id": resp["id"], "name": graph.pretty(resp["name"]), "rounds": set(),
+                                                 "description": None})
+            co["rounds"].update(r["id"] for r in out)
+            co["investors"] = len(inv)
+            co["description"] = co.get("description") or ((resp.get("properties") or {}).get("description") or {}).get("value") \
+                or resp.get("description")
     elif body == graph.INVESTOR_BODY and resp.get("name"):
         _index_add(resp["id"], resp["name"], resp.get("entity_type"), resp.get("description"))
 
@@ -92,6 +116,7 @@ def _index_walked(result: dict) -> None:
 
 def build_index() -> None:
     INDEX.clear()
+    ISSUERS.clear()
     c = cala_mod.get()
     with c.dblock:
         rows = c.db.execute("select url, body, response from calls").fetchall()
@@ -123,6 +148,7 @@ async def lifespan(app: FastAPI):
 
 
 BACKGROUND: set[asyncio.Task] = set()   # walks that outlive the request that started them
+WARMING: set[str] = set()               # run ids being walked ahead of the founder asking
 PATIENCE = 8.0   # seconds an answer may take before it is sent behind a trickle of spaces
 
 
@@ -218,7 +244,24 @@ async def examples():
             ids = list(dict.fromkeys(s_["ids"] + (fam["ids"] if fam else [])))[:6]
             softs.append({**s_, "ids": ids})
         out.append({**ex, "soft_yeses": softs})
-    return {"examples": out}
+    real = []
+    for ex in REAL:   # only from what is stored: an example never spends a credit
+        try:
+            d = await _company(ex["ids"], cache_only=True)
+        except CalaError:
+            d = None
+        inputs = _company_inputs(d) if d else None
+        if not inputs:
+            continue
+        stored = load_run(walk_mod.run_id(inputs))
+        if not stored or stored.get("pending"):
+            continue
+        names = [s["name"] for s in inputs["soft_yeses"]]
+        real.append({"id": ex["id"], "title": d["name"], "blurb": "From " + (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]),
+                     "soft_yeses": inputs["soft_yeses"], "stage": inputs["stage"], "company": inputs["company"],
+                     "found": {"leads": len(stored["leads"]), "run_id": stored["run_id"],
+                               "first": stored["leads"][0]["name"] if stored["leads"] and (stored.get("start") or {}).get("mode") in ("pick", "tie") else None}})
+    return {"examples": out, "real": real}
 
 
 def _local_hits(q: str, limit: int) -> list[dict]:
@@ -384,22 +427,177 @@ async def suggest(q: str = "", limit: int = 7):
     return {"items": out, "source": source}
 
 
-@app.get("/api/company")
-async def company(id: str):
-    """The founder's own company as Cala knows it: stage, industries, and who already invested."""
+REGISTRY = re.compile(r"^(?:an?\s+)?(?:british|uk|united kingdom|french|italian|german|spanish|swedish|dutch|irish)[\s‑-]"
+                      r"(?:based\s+)?[\w\s,&-]{0,60}?(?:company|firm|business)\b.{0,80}?\b(?:founded|incorporated|registered) in \d{4}",
+                      re.I)   # a line from a company register, not a description of a startup
+
+
+def _bare(name: str) -> str:
+    """'Cala AI' and 'Cala' are one company to the person typing."""
+    key = graph.norm(name)
+    for tail in pagecheck.TAILS:
+        if key.endswith(tail) and len(key) - len(tail) >= 4:
+            return key[:-len(tail)]
+    return key
+
+
+@app.get("/api/companies")
+async def companies(q: str = "", limit: int = 6):
+    """The picker for the founder's own company. Companies Cala holds a funding round for come first (they are known
+    from walks already made, so they cost nothing); a name not among them is put to Cala's own search."""
+    q = q.strip()[:60]
+    nq = graph.norm(q)
+    if len(nq) < 2:
+        return {"items": [], "source": "none"}
+    rows: dict[str, dict] = {}
+
+    def add(uid: str, name: str, description: str | None, typ: str | None) -> None:
+        known = ISSUERS.get(uid) or {}
+        rows.setdefault(uid, {"id": uid, "name": graph.pretty(name), "type": typ, "rounds": len(known.get("rounds") or ()),
+                              "investors": known.get("investors") or 0,
+                              "description": description or known.get("description")})
+
+    def fits(name: str) -> bool:
+        key = graph.norm(name)
+        return key.startswith(nq) or any(w.startswith(q.lower()) for w in name.lower().split()[1:])
+
+    for co in ISSUERS.values():
+        if fits(co["name"]):
+            add(co["id"], co["name"], co.get("description"), "Company")
+    source = "index"
+    if len(q) >= 3 and not any(graph.norm(r["name"]) == nq or _bare(r["name"]) == nq for r in rows.values()):
+        try:
+            for f in await graph.search(cala_mod.get(), q, limit=8):
+                if f["type"] in ("Company", "Organization") and (fits(f["name"]) or _related(q, f["name"])):
+                    _index_add(f["id"], f["raw_name"], f["type"], f["description"])
+                    add(f["id"], f["name"], f["description"], f["type"])
+            source = "cala"
+        except CalaError:
+            pass
+    # one row per company: 'Cala' and 'Cala AI' are the same to the person typing, and the entity with rounds leads
+    merged: dict[str, dict] = {}
+    for r in sorted(rows.values(), key=lambda r: (-r["rounds"], -r["investors"], bool(REGISTRY.search(r["description"] or "")),
+                                                   r["type"] != "Company", len(r["name"]))):
+        m = merged.get(_bare(r["name"]))
+        registry = bool(REGISTRY.search(r["description"] or ""))
+        if m and not (registry and not m["registry"]) and len(m["ids"]) < 4:
+            m["ids"].append(r["id"])
+            m["description"] = m["description"] or r["description"]
+            continue
+        if m:
+            continue   # a namesake from a company register under a startup of the same name: not offered
+        merged[_bare(r["name"])] = {"key": _bare(r["name"]), "name": r["name"], "ids": [r["id"]], "kind": "company",
+                                    "type": r["type"], "description": r["description"], "rounds": r["rounds"],
+                                    "known_rounds": r["rounds"], "investors": r["investors"], "registry": registry,
+                                    "walked": 0, "entities": []}
+
+    def place(m: dict) -> tuple:
+        exact = nq in (graph.norm(m["name"]), m["key"])
+        return (not (exact and (m["rounds"] or m["investors"])), not exact, not m["rounds"], m["registry"],
+                not graph.norm(m["name"]).startswith(nq), -m["rounds"], len(m["name"]))
+
+    items = sorted(merged.values(), key=place)[:limit]
+    for n, m in enumerate(items):
+        m["sure"] = n == 0 and nq in (graph.norm(m["name"]), m["key"]) and bool(m["rounds"] or m["investors"])
+    return {"items": items, "source": source}
+
+
+def _next_stage(stage: str | None) -> str | None:
+    """The round after the one the company has done, among the stages the form offers (Series C stands for C and later)."""
+    if stage in graph.STAGE_ORDER:
+        return graph.STAGE_ORDER[min(graph.STAGE_ORDER.index(stage) + 1, 4)]
+    return None
+
+
+async def _company(ids: list[str], cache_only: bool = False) -> dict | None:
+    """One company from the entities Cala holds it under. The entity with funding rounds decides who its investors
+    are; a second entity of the same name only adds to it when the first names none."""
     c = cala_mod.get()
+    got = []
+    for uid in ids[:4]:
+        try:
+            d = await graph.company(c, uid, cache_only=cache_only)
+        except BudgetExceeded:
+            d = await graph.company(c, uid, cache_only=True)
+        if d:
+            got.append(d)
+    if not got:
+        return None
+    got.sort(key=lambda d: (-len(d["rounds"]), -len(d["investors"])))
+    d = dict(got[0])
+    d["ids"] = [x["id"] for x in got]
+    for other in got[1:]:
+        for k in ("description", "website", "founded", "stage", "hq", "total_funding", "currency"):
+            d[k] = d.get(k) or other.get(k)
+        if not d["investors"]:
+            d["investors"] = other["investors"]
+    seen: dict[str, dict] = {}
+    for inv in d["investors"]:
+        _index_add(inv["id"], inv["name"], inv["type"])
+        inv["key"] = graph.norm(inv["name"])
+        known = INDEX.get(inv["key"], {})
+        inv["ids"] = known.get("ids", [inv["id"]])[:6]
+        inv["rounds"] = known.get("walked") or known.get("rounds") or 0
+        if inv.get("kind") != "person":
+            # Cala lists the investor under one of its entities ('General Catalyst Partners'): walk from the whole firm
+            fam = next((f for f in _families(_local_hits(inv["name"], 20), 3, inv["name"])
+                        if inv["id"] in f["ids"] or any(graph.norm(x["name"]) == inv["key"] for x in f["entities"])), None)
+            if fam and (fam["rounds"] > inv["rounds"] or len(fam["ids"]) > len(inv["ids"])):
+                inv.update({"name": fam["name"], "key": fam["key"], "rounds": fam.get("walked") or fam["rounds"],
+                            "ids": list(dict.fromkeys([inv["id"]] + fam["ids"]))[:6]})
+        if inv["key"] in seen:   # two entities of one firm on the cap table: one investor
+            seen[inv["key"]]["ids"] = list(dict.fromkeys(seen[inv["key"]]["ids"] + inv["ids"]))[:6]
+        else:
+            seen[inv["key"]] = inv
+    d["investors"] = list(seen.values())
+    if d["investors"] or d["rounds"]:
+        co = ISSUERS.setdefault(d["id"], {"id": d["id"], "name": d["name"], "rounds": set(), "description": d.get("description")})
+        co["rounds"].update(r["id"] for r in d["rounds"])
+        co["investors"] = len(d["investors"])
+    # who to walk from when the founder only names the company: its funds, the ones Cala knows best first
+    funds = sorted((v for v in d["investors"] if v.get("kind") != "person"), key=lambda v: -v["rounds"])
+    d["softs"] = [v["key"] for v in funds[:6]]
+    d["next_stage"] = _next_stage(d.get("stage"))
+    return d
+
+
+def _company_inputs(d: dict) -> dict | None:
+    softs = [{"name": v["name"], "ids": v["ids"], "kind": v.get("kind") or "fund"} for v in d["investors"] if v["key"] in d["softs"]]
+    if not softs:
+        return None
+    return _clean_inputs({"soft_yeses": softs, "stage": d["next_stage"], "company": {"id": d["id"], "ids": d["ids"], "name": d["name"]}})
+
+
+@app.get("/api/company")
+async def company(id: str, warm: bool = True):
+    """The founder's own company as Cala knows it: stage, industries, and who already invested. The walk from its
+    investors starts in the background at once, so the answer is close when the founder asks for it."""
+    ids = [i for i in id.split(",") if len(i) == 36][:4]
     try:
-        d = await graph.company(c, id)
-    except BudgetExceeded:
-        d = await graph.company(c, id, cache_only=True)
+        d = await _company(ids)
     except CalaError as exc:
         raise HTTPException(502, str(exc))
     if not d:
         raise HTTPException(404, "Cala has no such company")
-    for inv in d["investors"]:
-        _index_add(inv["id"], inv["name"], inv["type"])
-        inv["key"] = graph.norm(inv["name"])
-        inv["ids"] = INDEX.get(inv["key"], {}).get("ids", [inv["id"]])
+    inputs = _company_inputs(d)
+    d["run_id"] = walk_mod.run_id(inputs) if inputs else None
+    d["walked"] = bool(inputs and load_run(d["run_id"]))
+    if warm and inputs and not d["walked"] and d["run_id"] not in WARMING:
+        async def silent(event: dict) -> None:
+            return None
+
+        async def ahead() -> None:
+            try:
+                await _run(inputs, silent)
+            except Exception:  # noqa: BLE001 - only a head start; the founder's own walk reports its own failure
+                pass
+            finally:
+                WARMING.discard(d["run_id"])
+
+        WARMING.add(d["run_id"])
+        task = asyncio.create_task(ahead())
+        BACKGROUND.add(task)
+        task.add_done_callback(BACKGROUND.discard)
     return d
 
 
@@ -414,7 +612,9 @@ def _clean_inputs(body: dict) -> dict:
     stage = body.get("stage") if body.get("stage") in graph.STAGE_ORDER else None
     comp = body.get("company") if isinstance(body.get("company"), dict) else None
     if comp:
-        comp = {"id": comp.get("id"), "name": str(comp.get("name", ""))[:80]}
+        ids = [i for i in (comp.get("ids") or []) if isinstance(i, str) and len(i) == 36][:4]
+        comp = {"id": comp.get("id"), "name": str(comp.get("name", ""))[:80], **({"ids": ids} if ids else {}),
+                **({"blind": True} if comp.get("blind") else {})}
     return {"soft_yeses": softs, "stage": stage, "company": comp, "deep": bool(body.get("deep"))}
 
 
@@ -488,6 +688,12 @@ async def _run(inputs: dict, emit) -> dict:
         for uid in e["ids"]:
             _index_add(uid, e["name"], "Person" if e["kind"] == "person" else None, None, 0)
     _index_walked(result)
+    for e in result["leads"] + result["second_ring"]:   # companies met on this walk: the company picker knows them from now on
+        for d in e["evidence"]:
+            iss = d.get("issuer") or {}
+            if iss.get("id") and iss.get("name"):
+                ISSUERS.setdefault(iss["id"], {"id": iss["id"], "name": iss["name"], "rounds": set(),
+                                               "description": None})["rounds"].add(d["id"])
     return result
 
 
@@ -527,6 +733,74 @@ async def walk(request: Request):
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+async def _holdout(run_id: str) -> dict:
+    """The walk put to the test on the founder's own last round. Cala says who led it and the page is read. That lead
+    is taken out of the starting investors, the company's own rounds are left out, and the walk runs from the rest:
+    does it still reach the investor who led?"""
+    result = load_run(run_id)
+    if not result:
+        raise HTTPException(404, "No such run")
+    comp = (result.get("input") or {}).get("company") or {}
+    if not comp.get("id"):
+        return {"company": None}
+    hit = extras.blob_get("holdout:" + run_id)
+    if hit and hit.get("created", 0) >= result.get("created", 0) - 5:
+        return hit
+    c = cala_mod.get()
+    out = {"company": {"id": comp["id"], "name": comp.get("name")}, "round": None, "created": time.time()}
+    rounds = []
+    for cid in (comp.get("ids") or [comp["id"]]):
+        try:
+            got = await walk_mod.check_company(c, cid, comp.get("name") or "")
+        except BudgetExceeded:
+            continue
+        rounds += [r for r in got["rounds"] if any(i["is_lead"] for i in r["investors"])]
+    rounds.sort(key=lambda r: r.get("date") or "", reverse=True)
+    if not rounds:
+        extras.blob_put("holdout:" + run_id, out)
+        return out
+    rd = rounds[0]
+    leads = [i for i in rd["investors"] if i["is_lead"]]
+    lead_keys = {graph.norm(i["name"]) for i in leads}
+    softs = [s for s in result["input"]["soft_yeses"] if graph.norm(s["name"]) not in lead_keys]
+    out["round"] = {"stage": rd.get("stage"), "stage_name": rd.get("stage_name"), "date": rd.get("date"),
+                    "amount": rd.get("amount"), "currency": rd.get("currency"),
+                    "leads": [{"name": i["name"], "check": i.get("check")} for i in leads]}
+    out["from"] = [s["name"] for s in softs]
+    if not softs:
+        out["skipped"] = "The only investor to start from is the one who led."
+        extras.blob_put("holdout:" + run_id, out)
+        return out
+
+    async def silent(event: dict) -> None:
+        return None
+
+    inputs = _clean_inputs({"soft_yeses": [{**s, "kind": "fund"} for s in softs], "stage": rd.get("stage"),
+                            "company": {**comp, "blind": True}})
+    again = load_run(walk_mod.run_id(inputs))
+    if not again or again.get("pending") or "own" not in again:
+        again = await _run(inputs, silent)
+    found = []
+    for i in leads:
+        key = graph.norm(i["name"])
+        e = next((e for e in again["leads"] if e["key"] == key or (i.get("id") and i["id"] in e["ids"])
+                  or graph.family(e["name"]) == (graph.family(i["name"]) or key)), None)
+        if e:
+            found.append({"name": e["name"], "key": e["key"], "rank": e["rank"], "tier": e["tier"],
+                          "through": [{"company": d["issuer"]["name"], "stage_name": d["stage_name"], "date": d["date"],
+                                       "with": d["with"], "check": d.get("check"), "via": d.get("via")} for d in e["evidence"][:3]]})
+    found.sort(key=lambda f: f["rank"])
+    out.update({"run_id": again["run_id"], "of": len(again["leads"]), "found": found,
+                "top": [e["name"] for e in again["leads"][:3]]})
+    extras.blob_put("holdout:" + run_id, out)
+    return out
+
+
+@app.get("/api/holdout")
+async def holdout(run_id: str):
+    return await _patient(_holdout(run_id))
 
 
 @app.get("/api/run/{run_id}")

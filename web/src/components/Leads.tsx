@@ -91,7 +91,7 @@ export function useSays(result: Result, settled: boolean): (l: Lead) => SaysLine
 }
 
 /** One sentence from the investor's own site, word for word, over what it did in Cala. */
-export function SaysRow({ lead, says }: { lead: Lead; says: SaysLine | 'reading' }) {
+export function SaysRow({ lead, says, full }: { lead: Lead; says: SaysLine | 'reading'; full?: boolean }) {
   const [open, setOpen] = useState(false)
   if (says === 'reading') {
     return (
@@ -106,15 +106,19 @@ export function SaysRow({ lead, says }: { lead: Lead; says: SaysLine | 'reading'
       <div>
         <dt>Says</dt>
         <dd>
-          <button
-            type="button"
-            className={`lead-says__quote${open ? ' is-open' : ''}`}
-            aria-expanded={open}
-            title={open ? undefined : says.quote}
-            onClick={() => setOpen((o) => !o)}
-          >
-            <q>{says.quote}</q>
-          </button>
+          {full ? (
+            <q className="lead-says__quote is-open">{says.quote}</q>
+          ) : (
+            <button
+              type="button"
+              className={`lead-says__quote${open ? ' is-open' : ''}`}
+              aria-expanded={open}
+              title={open ? undefined : says.quote}
+              onClick={() => setOpen((o) => !o)}
+            >
+              <q>{says.quote}</q>
+            </button>
+          )}
           <a className="src" href={says.url} target="_blank" rel="noopener noreferrer" title={`Open the page on ${says.site}\n${says.url}`}>
             <span>{says.site}</span>
             <Icon name="out" size={11} />

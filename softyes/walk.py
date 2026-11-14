@@ -303,6 +303,8 @@ def _check_of(rd: dict, key: str, ids: list[str] | None = None) -> dict | None:
 def run_id(inputs: dict) -> str:
     key = {"s": sorted(sorted(s["ids"]) for s in inputs["soft_yeses"]), "stage": inputs.get("stage"),
            "company": (inputs.get("company") or {}).get("id")}
+    if (inputs.get("company") or {}).get("blind"):
+        key["blind"] = True   # the walk as it would have gone before the company's own round
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:10]
 
 
@@ -565,6 +567,19 @@ def _same_company(a: str, b: str) -> bool:
     return len(a) >= 6 and a.replace("and", "") == b.replace("and", "")   # 'Job&Talent' and 'Jobandtalent'
 
 
+def same_company(issuer: dict | None, mine: dict) -> bool:
+    """Is this round's company the founder's own? The same Cala entity, or the same name give or take a tail
+    ('Cala' and 'Cala AI'). Stricter than `_same_company`: 'Cala' is not 'Calabrio'."""
+    if not issuer:
+        return False
+    if issuer.get("id") and issuer["id"] in ((mine.get("ids") or []) + [mine.get("id")]):
+        return True
+    a, b = graph.norm(issuer.get("name") or ""), graph.norm(mine.get("name") or "")
+    if not a or not b:
+        return False
+    return a == b or any(a == b + t or b == a + t for t in pagecheck.TAILS)
+
+
 def _same_deal(a: dict, b: dict) -> bool:
     """Cala sometimes holds one deal as two round entities (one per report). Same company, and the same
     day, or the same stage in the same month, or the same amount within three months."""
@@ -746,6 +761,9 @@ def _verdict(s: dict) -> tuple[str, str]:
                         f"Under {MIN_HABIT} rounds is too few to call a habit.{pages}{more}{grant}")
     count = (f"Cala knows {n + k} rounds for {name} ({n} in its graph, {k} more in reports) and marks it lead in {led}." if k else
              f"Cala lists {n} rounds for {name}{cap} and marks it lead in {led}.")
+    twice = s.get("duplicates") or 0
+    if twice:   # the count is lower than the one Cala returns: say why
+        count += f" Cala holds {'one deal' if twice == 1 else f'{twice} deals'} twice, counted once here."
     rate = led / (n + k)
     if rate >= 0.5:
         return "leads", f"{count}{pages} In Cala it leads more often than it follows, so ask what would make it lead yours.{sample}{grant}"
@@ -1067,6 +1085,32 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             s["followed"] -= n
             s["duplicates"] = n
             s["lead_rate"] = round(s["led"] / s["rounds_in_cala"], 2) if s["rounds_in_cala"] else None
+            # the count shown while reading was Cala's own; say why it is lower now
+            await emit({"t": "fold", "key": s["key"], "name": s["name"], "rounds": s["rounds_in_cala"], "led": s["led"],
+                        "followed": s["followed"], "folded": n})
+
+    # The founder's own company. Its rounds say who led already, not who could lead next: they are set aside and shown
+    # on their own. An investor Cala already lists in the company is not offered as a new lead either.
+    mine = inputs.get("company") or {}
+    own_rounds: list[dict] = []
+    already: dict[str, str] = {}
+    if mine.get("id") or mine.get("name"):
+        for rid in [rid for rid, rd in rounds.items() if same_company(rd.get("issuer"), mine)]:
+            rd = rounds.pop(rid)
+            own_rounds.append({**_round_brief(rd), "with": [s["name"] for s in softs if s["key"] in joined[rid]],
+                               "investors": len(rd["investors"]),
+                               "leads": [{"key": graph.norm(i["name"]), "name": i["name"], "check": i.get("check")}
+                                         for i in rd["investors"] if i["is_lead"] and not _no_name(i["name"])],
+                               "sources": _fact_sources(rd["sources"], rd, rd["date"], 3)})
+        own_rounds.sort(key=lambda d: d["date"] or "", reverse=True)
+        # `blind`: the walk as it was before the company's own round, when nobody was in it yet
+        for cid in ([] if mine.get("blind") else (mine.get("ids") or [mine.get("id")])):
+            prof = await guarded(graph.company, cid) if cid else None
+            for v in (prof or {}).get("investors", []):
+                already.setdefault(graph.norm(v["name"]), v["name"])
+                if graph.family(v["name"]):
+                    already.setdefault(graph.family(v["name"]), v["name"])
+    left_out: dict[str, str] = {}
 
     # 2. Who led those rounds, and who else sat in them.
     leads: dict[str, dict] = {}
@@ -1078,6 +1122,10 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         for i in rd["investors"]:
             key = graph.norm(i["name"])
             if i["id"] in soft_ids or key in soft_keys or not key or _no_name(i["name"]):
+                continue
+            if key in already or graph.family(i["name"]) in already:
+                if i["is_lead"]:
+                    left_out[key] = i["name"]
                 continue
             book = leads if i["is_lead"] else cos
             e = book.setdefault(key, {"key": key, "name": i["name"], "ids": [], "kind": i["kind"], "rounds": {}})
@@ -1450,6 +1498,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         # facts Cala attaches to a round from pages older than the round: shown with a caution, or left out
         "set_aside": sum(bool(d.get("caution")) + bool(d.get("amount_set_aside")) for e in first + second_out for d in e["evidence"]),
         "rounds_walked": len(rounds), "duplicates_folded": folded["_all"],
+        # the founder's own rounds, kept out of the walk, and leads left out because Cala already lists them in the company
+        "own": {"company": mine, "rounds": own_rounds[:4], "already_in": sorted(left_out.values())} if mine.get("id") else None,
         # the pages Cala cites, re-read: how many "led" claims they confirm, correct or leave open
         "page_check": {"rounds": tally["rounds"], "pages": tally["pages"], "confirmed": tally["lead"], "corrected": tally["corrected"],
                        "added": tally["promoted"], "unstated": tally["unstated"] + tally["absent"],

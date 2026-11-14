@@ -10,6 +10,8 @@ interface Tally { cala_calls?: number; fresh?: number; cached?: number }
 export type WalkEvent =
   | { t: 'start'; soft_yeses: { key: string; name: string }[] }
   | ({ t: 'investor'; key: string; name: string; rounds: number; led: number; followed: number; walking: number } & Tally)
+  // One deal Cala holds as two round entities counts once, so the investor's count drops after its rounds are read.
+  | { t: 'fold'; key: string; name: string; rounds: number; led: number; followed: number; folded: number }
   | ({ t: 'round'; soft: string; round: RoundBrief; leads: { key: string; name: string; kind: Kind }[]; others: number; via?: 'round' | 'cap_table' | 'knowledge' } & Tally)
   // The graph walk is in hand; investors with few rounds are now read again through Cala's knowledge search.
   | { t: 'partial'; run_id: string; result: Result; reading: string[] }
@@ -88,7 +90,7 @@ export interface Counters {
 export interface WalkInputs {
   soft_yeses: SoftInput[]
   stage: StageId | null
-  company: { id: string; name: string } | null
+  company: { id: string; name: string; ids?: string[] } | null
 }
 
 export type Phase = 'idle' | 'walking' | 'done' | 'error'
@@ -173,6 +175,15 @@ export function applyEvent(s: WalkState, e: WalkEvent): WalkState {
         counters: ((c) => ({ ...c, facts: c.facts + e.rounds }))(tally(s.counters, e)),
         narration: none ? `Cala has no funding rounds for ${e.name}` : `Reading ${possessive(e.name)} ${plural(e.rounds, 'round')} in Cala`,
         detail: none ? 'Nothing to walk from it' : `It led ${e.led} and followed in ${e.followed}`,
+      }
+    }
+    case 'fold': {
+      const softs = m.softs.map((x) => (x.key === e.key ? { ...x, rounds: e.rounds, led: e.led, followed: e.followed } : x))
+      return {
+        ...s,
+        model: { ...m, softs },
+        narration: `Cala holds ${e.folded === 1 ? 'one' : e.folded} of ${possessive(e.name)} deals twice`,
+        detail: `Counted once, that is ${plural(e.rounds, 'round')}`,
       }
     }
     case 'round': {
@@ -477,7 +488,7 @@ function finalCounters(result: Result): Counters {
 
 const BASE_DELAY: Record<WalkEvent['t'], number> = {
   start: 420, investor: 560, round: 135, leads: 520, pulse: 105, verify: 180, note: 500, ledger: 0, done: 0, error: 0,
-  partial: 0, knowledge: 0, captable: 0, pages: 0,
+  partial: 0, knowledge: 0, captable: 0, pages: 0, fold: 700,
 }
 /** The page check keeps its own beat however long the walk is: long enough to see the pages being read, then what they said. */
 const PAGES_MS = { reading: 1500, done: 1100 }
@@ -806,7 +817,9 @@ function inputFromResult(result: Result): WalkInputs {
   return {
     soft_yeses: result.input.soft_yeses.map((s) => ({ name: s.name, ids: s.ids })),
     stage: result.input.stage,
-    company: result.input.company?.id ? { id: result.input.company.id, name: result.input.company.name } : null,
+    company: result.input.company?.id
+      ? { id: result.input.company.id, name: result.input.company.name, ...(result.input.company.ids ? { ids: result.input.company.ids } : {}) }
+      : null,
   }
 }
 

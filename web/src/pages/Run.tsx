@@ -7,6 +7,7 @@ import { rememberRun, useConfig, useMedia } from '../lib/store'
 import { forgetWalking, pagesLine, useWalk, walkingInputs, walkStore, type WalkState } from '../lib/walk'
 import { AmountFix, ClaimStrip, LeadFix, StageFix } from '../components/Evidence'
 import { Answer } from '../components/Answer'
+import { OwnRound } from '../components/OwnRound'
 import { LeadDetail, LeadList, useSays, type Tab } from '../components/Leads'
 import { Verdicts } from '../components/Verdicts'
 import { WalkGraph } from '../components/WalkGraph'
@@ -529,6 +530,8 @@ export function Run() {
           </Answer>
         )}
 
+        {answered && result && settled && result.own?.company?.id && <OwnRound result={result} />}
+
         {answered && meta}
 
         {!stopped && (
@@ -555,7 +558,6 @@ export function Run() {
                   </h2>
                   <p>
                     Ranked by the rounds they led with {listOr(softNames)}, and by whether they still lead.
-                    {attending > 0 ? ` ${attending} of them ${attending === 1 ? 'is' : 'are'} registered for Slush.` : ''}
                     {usual ? ` No stage given: ${usual.rounds} of the ${usual.of} staged rounds are ${usual.stage_name}, so ${usual.stage_name} leads rank higher.` : ''}
                     {wide && (
                       <span className="run__keys">
@@ -564,6 +566,14 @@ export function Run() {
                       </span>
                     )}
                   </p>
+                  {attending > 0 && (
+                    <p className="run__slush">
+                      <span className="tag">At Slush</span>
+                      <span>
+                        <b className="num">{attending}</b> of them {attending === 1 ? 'is' : 'are'} registered for Slush.
+                      </span>
+                    </p>
+                  )}
                 </div>
                 {result.leads.length === 0 && (
                   <p className="notice">

@@ -20,7 +20,9 @@ from . import cala as cala_mod
 from . import graph, slush_mcp
 from .cala import BudgetExceeded, Cala, CalaError
 
-GEMINI_MODEL = os.environ.get("SOFTYES_GEMINI_MODEL", "gemini-3.8-flash")
+# Two models: the one that answers while a person waits (the message), and the one that reads a fund's site, where nobody waits.
+GEMINI_MODEL = os.environ.get("SOFTYES_GEMINI_MODEL", "gemini-4-hydrogen")
+GEMINI_READER = os.environ.get("SOFTYES_GEMINI_READER", "gemini-4-carbon")
 GEMINI_EFFORT = os.environ.get("SOFTYES_GEMINI_EFFORT", "low")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 OXYLABS_URL = "https://webapi.oxylabs.io/v1/scrape"
@@ -71,16 +73,16 @@ def blob_put(key: str, value) -> None:
         c.db.execute("insert or replace into blobs values(?,?,?)", (key, time.time(), json.dumps(value, ensure_ascii=False)))
 
 
-async def gemini_json(system: str, user: str, temperature: float = 0.4):
+async def gemini_json(system: str, user: str, temperature: float = 0.4, model: str | None = None):
     """One Gemini call that must return JSON. Returns None when Gemini is unavailable or answers badly."""
     if not gemini_ready():
         return None
-    payload = {"model": GEMINI_MODEL, "temperature": temperature, "response_format": {"type": "json_object"},
+    payload = {"model": model or GEMINI_MODEL, "temperature": temperature, "response_format": {"type": "json_object"},
                "reasoning_effort": GEMINI_EFFORT,
                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     for attempt in range(2):
         try:
-            r = await gemini_http().post(GEMINI_URL, json=payload, timeout=25,
+            r = await gemini_http().post(GEMINI_URL, json=payload, timeout=40 if model else 25,
                                          headers={"Authorization": f"Bearer {os.environ['JUNCTION_GEMINI_API_KEY']}"})
             if r.status_code == 200:
                 text = r.json()["choices"][0]["message"]["content"]
@@ -503,6 +505,8 @@ async def says(cala: Cala, lead: dict) -> dict:
     uid = lead.get("id")
     key = "says:" + (uid or lead["key"])
     hit = blob_get(key, max_age=3 * 86400)
+    if hit and hit.get("model") and hit["model"] != GEMINI_READER:
+        hit = None   # read by an earlier model: read again
     p = lead.get("pulse") or {}
     did = {"rounds": p.get("rounds"), "led": p.get("led"), "lead_rate": p.get("lead_rate"),
            "led_recent": p.get("led_recent"), "recent_months": p.get("recent_months"), "led_stages": p.get("led_stages", []),
@@ -552,7 +556,7 @@ async def says(cala: Cala, lead: dict) -> dict:
         "how it invests: whether it leads rounds, at which stage, cheque size, sectors or geography. Copy each sentence "
         "EXACTLY as written, character for character, no edits, no ellipsis. If nothing fits, return an empty list. "
         'Return JSON: {"quotes": [{"quote": "...", "topic": "leads|stage|cheque|sector|geography", "page": 1}]}',
-        corpus, temperature=0.0)
+        corpus, temperature=0.0, model=GEMINI_READER)
     quotes = []
     for q in (out or {}).get("quotes", []) if isinstance(out, dict) else []:
         text = str(q.get("quote", "")).strip()
@@ -565,7 +569,7 @@ async def says(cala: Cala, lead: dict) -> dict:
                 break
     order = {"leads": 0, "stage": 1, "cheque": 2, "sector": 3, "geography": 4}
     quotes.sort(key=lambda q: order[q["topic"]])
-    base.update({"available": True, "quotes": quotes[:4], "model": GEMINI_MODEL if out is not None else None,
+    base.update({"available": True, "quotes": quotes[:4], "model": GEMINI_READER if out is not None else None,
                  "reason": None if quotes else "No sentence about how it invests was found on its site."})
     if out is not None:   # an answer made while Gemini was down is not kept
         blob_put(key, base)

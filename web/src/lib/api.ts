@@ -258,7 +258,7 @@ export interface Result {
     soft_yeses: { name: string; ids: string[] }[]
     stage: StageId | null
     stage_name: string | null
-    company: { id: string | null; name: string } | null
+    company: { id: string | null; name: string; ids?: string[] } | null
     /** No stage given: the one most of the walked rounds carry. */
     stage_usual?: { stage: string; stage_name: string; rounds: number; of: number } | null
   }
@@ -280,6 +280,13 @@ export interface Result {
   page_check?: PageCheck | null
   /** Set on a first result while the second pass is still reading these investors; gone from the final one. */
   pending?: string[]
+  /** The founder's own company: its rounds, kept out of the walk, and leads left out because Cala already lists them in it. */
+  own?: {
+    company: CompanyRef
+    rounds: { id: string; stage_name: string | null; date: string | null; amount: number | null; currency: string | null
+      with: string[]; investors: number; leads: { key: string; name: string; check: Check | null }[] }[]
+    already_in: string[]
+  } | null
 }
 
 export interface Profile {
@@ -309,13 +316,22 @@ export interface Example {
   blurb: string
   soft_yeses: SoftInput[]
   stage: StageId | null
+  /** Set when the example is a real company: the walk starts from the investors Cala lists in it. */
+  company?: CompanyRef | null
+  /** What the stored walk found, so the row can say it before it is opened. */
+  found?: { leads: number; first: string | null; run_id: string } | null
 }
+
+/** The founder's own company. `ids`: every Cala entity it is held under. */
+export interface CompanyRef { id: string; name: string; ids?: string[] }
 
 export interface Suggestion {
   key: string
   name: string
   ids: string[]
-  kind: Kind
+  kind: Kind | 'company'
+  /** A company: how many investors Cala lists in it. */
+  investors?: number
   type: string | null
   description: string | null
   known_rounds: number
@@ -335,9 +351,36 @@ export interface Company {
   currency: string | null
   stage: string | null
   hq: string | null
-  investors: { id: string; ids: string[]; key: string; name: string; kind: Kind }[]
+  investors: { id: string; ids: string[]; key: string; name: string; kind: Kind; rounds?: number }[]
   rounds: unknown
   industries: { id: string; name: string }[]
+  /** Every Cala entity read as this company. */
+  ids?: string[]
+  /** Keys of the investors to walk from when the founder only names the company. */
+  softs?: string[]
+  /** The round after the one Cala has it at. */
+  next_stage?: StageId | null
+  /** The walk from `softs` at `next_stage`: its id, and whether it is stored already. */
+  run_id?: string | null
+  walked?: boolean
+}
+
+/** The walk tested on the founder's own last round: its lead taken out of the start, the company's rounds left out. */
+export interface Holdout {
+  company: { id: string; name: string } | null
+  round?: {
+    stage: string | null; stage_name: string | null; date: string | null; amount: number | null; currency: string | null
+    leads: { name: string; check: Check | null }[]
+  } | null
+  from?: string[]
+  skipped?: string
+  run_id?: string
+  of?: number
+  found?: {
+    name: string; key: string; rank: number; tier: string
+    through: { company: string; stage_name: string | null; date: string | null; with: string[]; check: Check | null; via?: string }[]
+  }[]
+  top?: string[]
 }
 
 export type DraftKind = 'intro_ask' | 'direct' | 'slush'
@@ -495,10 +538,14 @@ export const api = {
   audit: (signal?: AbortSignal) => request<Audit>('/api/audit', { signal }),
   backtest: (signal?: AbortSignal) => request<Backtest>('/api/backtest', { signal }),
   check: (by: { q?: string; id?: string }, signal?: AbortSignal) => request<CompanyCheck>(`/api/check?${qs(by)}`, { signal }),
-  examples: () => request<{ examples: Example[] }>('/api/examples'),
+  examples: () => request<{ examples: Example[]; real?: Example[] }>('/api/examples'),
   suggest: (q: string, signal?: AbortSignal) =>
     request<{ items: Suggestion[]; source: 'index' | 'cala' | 'none' }>(`/api/suggest?${qs({ q })}`, { signal }),
-  company: (id: string, signal?: AbortSignal) => request<Company>(`/api/company?${qs({ id })}`, { signal }),
+  companies: (q: string, signal?: AbortSignal) =>
+    request<{ items: Suggestion[]; source: 'index' | 'cala' | 'none' }>(`/api/companies?${qs({ q })}`, { signal }),
+  company: (ids: string | string[], signal?: AbortSignal) =>
+    request<Company>(`/api/company?${qs({ id: Array.isArray(ids) ? ids.join(',') : ids })}`, { signal }),
+  holdout: (runId: string, signal?: AbortSignal) => request<Holdout>(`/api/holdout?${qs({ run_id: runId })}`, { signal }),
   run: (runId: string, signal?: AbortSignal) => request<Result>(`/api/run/${encodeURIComponent(runId)}`, { signal }),
   investor: (ids: string[], name: string | null, signal?: AbortSignal) =>
     request<Result>(`/api/investor?${qs({ ids: ids.join(','), name })}`, { signal }),
