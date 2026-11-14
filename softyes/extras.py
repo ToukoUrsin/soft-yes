@@ -260,15 +260,15 @@ def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
         subject = ""
         body = (f"{soft} has said it will join {company}'s {raising} once a lead is in. "
                 + (f"You {led_verb} {deal} with them. " if deal else "")
-                + "25 minutes at Slush to see if you'd lead?")
+                + "Could we meet at Slush to see if you'd lead?")
         if len(body) > 300:
-            body = f"{soft} will follow in {company}'s {raising}. " + (f"You {led_verb} {deal} with them. " if deal else "") + "25 min at Slush?"
+            body = f"{soft} will follow in {company}'s {raising}. " + (f"You {led_verb} {deal} with them. " if deal else "") + "Meet at Slush?"
         body = body[:300]
     else:
         subject = f"{company}: {raising}, {soft} is in"
         body = (f"Hi,\n\n{company}: {one}\n\nWe are raising {a_raising}. {soft} has said it will join once a lead is in. "
                 + (f"You {led_verb} {deal} with {soft} in the round, which is why I'm writing to you first. " if deal else "")
-                + "Could we find 25 minutes this week?\n\nThanks")
+                + "Could we find time for a short call this week?\n\nThanks")
     return {"subject": subject, "body": body}
 
 
@@ -290,7 +290,6 @@ def verify_draft(text: str, facts: list[str], founder: dict) -> list[str]:
         if m.lower().replace(" ", "").rstrip(".,") not in tight:
             bad.append(m)
     text = re.sub(money, " ", text)
-    text = re.sub(r"\b25[- ]minutes?\b", " ", text)   # the length of the meeting we ask for, not a fact
     for num in re.findall(r"\d[\d.,]*", text):
         n = num.strip(".,")
         if n and n not in allowed and n.replace(",", "") not in allowed.replace(",", ""):
@@ -330,12 +329,12 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
                   f"'you', never its name or 'they'. Open with 'Hi,', then one sentence on what the company does and the round "
                   f"being raised exactly as in FACTS. Then say {soft} has told us it will invest once a lead is in. Then why you "
                   f"write to them first: the most recent round they led with {soft} in it (company, stage, month, and the amount "
-                  f"only if FACTS give one), and how many such rounds there are if FACTS give more than one. Ask for 25 minutes. "
+                  f"only if FACTS give one), and how many such rounds there are if FACTS give more than one. Ask for a short call, with no length in minutes. "
                   f"60-90 words. Do not mention Cala.",
         "slush": f"A meeting request note for the Slush meeting tool, from the founder to {lead['name']}. Write to them as 'you'. "
                  f"Hard limit 280 characters, two or three sentences: what the company does in a few words and the round being "
                  f"raised, that {soft} will invest once a lead is in, the most recent round they led with {soft} in it (company "
-                 f"and stage), and a request for 25 minutes at Slush. Do not mention Cala.",
+                 f"and stage), and a request to meet at Slush, with no length in minutes. Do not mention Cala.",
     }[kind]
     system = ("You write short, plain fundraising messages for a startup founder. Use ONLY the facts in FACTS. "
               "When FACTS say an investor 'is listed as an investor in that round, but the announcement does not name' it, "
