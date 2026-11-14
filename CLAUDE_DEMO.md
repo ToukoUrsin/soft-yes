@@ -1,6 +1,6 @@
 # Soft Yes in Claude: the demo
 
-Checked 14.11 at 20:15 EET on claude.ai in Chrome, on your Claude account. Soft Yes is added there and set to "Always allow", so nothing asks for a click.
+Checked 14.11 at 23:25 EET on claude.ai in Chrome, on your Claude account. Soft Yes is added there and set to "Always allow", so nothing asks for a click.
 
 ## Before you walk over
 
