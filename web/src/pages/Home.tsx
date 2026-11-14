@@ -258,6 +258,7 @@ function SoftYesAsk({ config }: { config: Config | null }) {
             ) : (
               <SingleField
                 label="Your company"
+                company
                 placeholder="Find your company in Cala"
                 emptyHint="You can leave this empty."
                 onPick={(s) => setCompany({ id: s.ids[0], name: s.name })}

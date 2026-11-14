@@ -345,7 +345,7 @@ function Record({ lead, onReach }: { lead: Lead; onReach: () => void }) {
                 <>
                   <span className="sep"> · </span>
                   {led ? 'co-led by ' : 'led by '}
-                  <InvestorList names={e.co_leads} />
+                  <InvestorList names={e.co_leads} doubt={e.co_doubt} />
                 </>
               )}
               {e.investors != null && e.investors > 0 && (

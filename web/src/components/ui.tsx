@@ -338,13 +338,14 @@ export function Investor({ name, ids, className }: { name: string; ids?: string[
   )
 }
 
-export function InvestorList({ names, conj = 'and' }: { names: string[]; conj?: 'and' | 'or' }) {
+export function InvestorList({ names, conj = 'and', doubt }: { names: string[]; conj?: 'and' | 'or'; doubt?: string[] }) {
   return (
     <>
       {names.map((n, i) => (
         <span key={n}>
           {i > 0 && (i === names.length - 1 ? ` ${conj} ` : ', ')}
           <Investor name={n} />
+          {doubt?.includes(n) && <span className="name-doubt" title="Cala may have tied this name to the wrong company. Read the source before you use it."> (name in doubt)</span>}
         </span>
       ))}
     </>

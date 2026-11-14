@@ -176,8 +176,8 @@ def cala_facts(result: dict, lead: dict) -> list[str]:
         [d for d in ev if _status(d) not in ("unstated", "other", "absent", "off")] or ev
     for d in rows[:4]:
         who = " and ".join(d["with"])
-        co = [c for c in d.get("co_leads") or [] if c][:2]
-        verb = ("co-led" if co else "led") if lead["ring"] == 1 else "took part in"
+        co = [c for c in d.get("co_leads") or [] if c and c not in (d.get("co_doubt") or [])][:2]   # never a name in doubt
+        verb = ("co-led" if d.get("co_leads") else "led") if lead["ring"] == 1 else "took part in"
         unnamed = [w for w, on in zip(d["with"], d.get("with_on_page") or []) if on is False]
         facts.append(f"{name} {verb} {deal_phrase(d)}{' together with ' + ' and '.join(co) if co else ''}. "
                      + (f"{who} took part in that round." if not unnamed else

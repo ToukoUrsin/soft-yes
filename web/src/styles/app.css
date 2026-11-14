@@ -4065,3 +4065,9 @@ main.page {
     height: 30px;
   }
 }
+
+/* A co-lead whose name Cala may have tied to the wrong company. */
+.name-doubt {
+  color: var(--warn);
+  white-space: nowrap;
+}

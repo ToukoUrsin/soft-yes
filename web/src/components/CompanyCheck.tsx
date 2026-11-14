@@ -12,6 +12,14 @@ const TRY = ['Verda', 'Measur', 'Lovable', 'Wolt']
 const DANGLING = /^(an?|the|in|at|of|on|for|with|and|or|by|to|from|that|which|based|headquartered|founded|located)$/i
 
 /** A few words that tell two companies of one name apart, never ending on "in" or "founded". */
+/** Cala's one-line description without its founding year: no page here backs that year, and it is often the year of the
+ *  source (Oura, "founded in 2025"), so the header does not repeat it as fact. */
+function unfounded(description: string): string {
+  return description
+    .replace(/,?\s*(?:and\s+)?(?:(?:was|were|originally)\s+)*(?:founded|established|incorporated|started)\s+in\s+(?:19|20)\d\d\b/gi, '')
+    .replace(/\s+([,.])/g, '$1').replace(/,\s*\./g, '.').trim()
+}
+
 function shortHint(description: string): string {
   const words = description.replace(/^(an?|the)\s+/i, '').split(/\s+/).slice(0, 4).map((w) => w.replace(/[,.;:]+$/, ''))
   while (words.length > 1 && DANGLING.test(words[words.length - 1])) words.pop()
@@ -112,7 +120,7 @@ function Answer({ d, onPick }: { d: Result; onPick: (id: string, name: string) =
       <div className="ccheck__co">
         <div>
           <h3>{co.name}</h3>
-          {co.description && <p className="truncate">{co.description}</p>}
+          {co.description && <p className="truncate">{unfounded(co.description)}</p>}
         </div>
         {others.length > 0 && (
           <p className="ccheck__others">

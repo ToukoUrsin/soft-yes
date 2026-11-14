@@ -60,13 +60,15 @@ function typeLabel(s: Suggestion): string {
   return s.type === 'Company' ? 'Company' : 'Organisation'
 }
 
-function roundsLabel(s: Suggestion): string {
-  return s.known_rounds > 0 ? `${plural(s.known_rounds, 'round')} in Cala` : 'No rounds in Cala yet'
+/** The count is of rounds it invested in. A founder's own company is not expected to have any, so that field says nothing. */
+function roundsLabel(s: Suggestion, company?: boolean): string {
+  if (s.known_rounds > 0) return `${company ? 'Invested in ' : ''}${plural(s.known_rounds, 'round')}${company ? '' : ' in Cala'}`
+  return company ? '' : 'No rounds as an investor in Cala'
 }
 
 /** One line a screen reader or an agent can tell two similar names apart by. */
-function optionLabel(s: Suggestion, off: boolean | undefined): string {
-  return [s.name, s.did_you_mean ? 'closest name in Cala' : typeLabel(s), off ? 'already added' : roundsLabel(s), s.description]
+function optionLabel(s: Suggestion, off: boolean | undefined, company?: boolean): string {
+  return [s.name, s.did_you_mean ? 'closest name in Cala' : typeLabel(s), off ? 'already added' : roundsLabel(s, company), s.description]
     .filter(Boolean)
     .join(', ')
 }
@@ -80,9 +82,10 @@ interface ListProps {
   onPick: (s: Suggestion) => void
   disabledKeys?: Set<string>
   emptyHint: string
+  company?: boolean
 }
 
-function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys, emptyHint }: ListProps) {
+function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys, emptyHint, company }: ListProps) {
   const q = query.trim()
   const fresh = state.for === q
   // Enter on its own takes the top row only when Cala is sure it is the name typed.
@@ -112,7 +115,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
                 role="option"
                 aria-selected={active >= 0 ? i === active : sure && i === 0}
                 aria-disabled={off || undefined}
-                aria-label={optionLabel(s, off)}
+                aria-label={optionLabel(s, off, company)}
                 className={`opt${sure && i === 0 ? ' opt--top' : ''}`}
                 onMouseMove={() => i !== active && setActive(i)}
                 onClick={() => !off && onPick(s)}
@@ -122,7 +125,7 @@ function SuggestList({ id, state, query, active, setActive, onPick, disabledKeys
                   <span className="opt__type">{typeLabel(s)}</span>
                 </span>
                 <span className={`opt__side num${!off && !s.known_rounds ? ' opt__side--none' : ''}`}>
-                  {off ? 'Added' : roundsLabel(s)}
+                  {off ? 'Added' : roundsLabel(s, company)}
                   {sure && i === 0 && <kbd className="kbd opt__enter">Enter</kbd>}
                 </span>
                 {s.description && <span className="opt__desc truncate">{s.description}</span>}
@@ -285,7 +288,7 @@ export function TokenField({
 // ---------------------------------------------------------------------------------- single field
 
 export function SingleField({
-  onPick, placeholder, label, autoFocus, large, emptyHint,
+  onPick, placeholder, label, autoFocus, large, emptyHint, company,
 }: {
   onPick: (s: Suggestion) => void
   placeholder: string
@@ -293,6 +296,7 @@ export function SingleField({
   autoFocus?: boolean
   large?: boolean
   emptyHint: string
+  company?: boolean
 }) {
   const id = useId()
   const [q, setQ] = useState('')
@@ -328,7 +332,7 @@ export function SingleField({
           else if (e.key === 'Escape' && q) { e.preventDefault(); e.stopPropagation(); setQ('') }
         }}
       />
-      {open && <SuggestList id={id} state={state} query={q} active={active} setActive={setActive} onPick={pick} emptyHint={emptyHint} />}
+      {open && <SuggestList id={id} state={state} query={q} active={active} setActive={setActive} onPick={pick} emptyHint={emptyHint} company={company} />}
     </div>
   )
 }

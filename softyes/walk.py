@@ -1357,6 +1357,11 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
     for n, e in enumerate(first, 1):
         e["rank"] = n
     second_out = sorted((finish(c) for c in second), key=lambda e: e["score"], reverse=True)
+    # A co-lead whose name Cala may have tied to the wrong company is in doubt wherever it is named, not only on its own card.
+    in_doubt = {graph.norm(e["name"]) for e in first if e.get("doubt") or e.get("tier") == "check"}
+    for e in first + second_out:
+        for d in e["evidence"]:
+            d["co_doubt"] = [n for n in d.get("co_leads") or [] if graph.norm(n) in in_doubt]
     for e in first + second_out:
         e["why"] = _why(e, want_stage)
 

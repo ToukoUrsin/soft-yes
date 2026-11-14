@@ -66,6 +66,8 @@ export interface Evidence extends RoundBrief {
   /** Parallel to `with`: does a page about the round name that investor? false: Cala lists it, the page does not. */
   with_on_page?: (boolean | null)[]
   co_leads: string[]
+  /** Co-leads whose name Cala may have tied to the wrong company. */
+  co_doubt?: string[]
   investors: number | null
   relation?: Relation
   via?: Via
