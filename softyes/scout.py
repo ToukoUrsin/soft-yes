@@ -560,11 +560,11 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         sig.append({"id": "field", "label": "Your field", "on": n_field > 0, "text": text, "n": n_field})
         # leading
         if own and own["rounds"]:
-            more = "at least " if own["capped"] else ""
             n = walk._plural(own["rounds"], "round")
+            of = f"the {n} read in Cala (it has more)" if own["capped"] else f"its {n} in Cala"
             sig.append({"id": "leads", "label": "Leads rounds", "on": own["led"] >= 2,
-                        "text": f"Led {own['led']} of its {more}{n} in Cala" if own["led"]
-                        else f"Led none of its {more}{n} in Cala" + (": it follows" if own["rounds"] >= 4 else "")})
+                        "text": f"Led {own['led']} of {of}" if own["led"]
+                        else f"Led none of {of}" + (": it follows" if own["rounds"] >= 4 else "")})
         elif led:
             sig.append({"id": "leads", "label": "Leads rounds", "on": True, "text": f"Led {walk._plural(len(led), 'round')} here"})
         # the stage
