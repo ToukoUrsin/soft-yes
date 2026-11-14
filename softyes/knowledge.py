@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from . import graph
+from . import graph, pagecheck
 from .cala import Cala, Ledger
 
 QUESTION = "Funding rounds where {name} invested but another investor was the lead"
@@ -161,3 +161,84 @@ async def followed(cala: Cala, name: str, own_key: str, ledger: Ledger | None = 
             unique.append({**r, "id": rid})
     return {"question": QUESTION.format(name=name), "rows": unique, "read": len(rows), "dropped": dropped,
             "passages": len(d.get("context") or [])}
+
+
+COMPANY_QUESTION = "Who led each funding round of {name}?"
+SAYS_LED = re.compile(r"(?<![\w-])(?:(?:co-?)?led by|(?:co-?)?lead investors?|(?:co-?)?led (?:the|a|an|its|this|that)\b|"
+                      r"(?:co-?)?leads? (?:the|a|an|its|this)\b[^.|]{0,60}\b(?:round|financing|funding)|(?:co-?)?leading (?:the|a|its|this)\b)", re.I)
+# A sentence that does not name the company counts only on a page about it, and only when it opens on the round itself.
+ITS_ROUND = re.compile(r"(?:(?:the|this|its|a|an)\s+)?(?:[\w$€£.-]+\s+){0,4}?(?:round|funding|financing|investment|series [a-h]|seed)\b", re.I)
+
+
+def _table_rows(text: str, limit: int = 4) -> list[str]:
+    """Rows of a table that has a lead column, each written out as 'column: cell'. A row whose cells do not line up
+    with the header is skipped."""
+    out, head, lead = [], None, None
+    for line in text.splitlines():
+        if not line.strip().startswith("|"):
+            if not re.fullmatch(r"[\s:|-]*", line):
+                head = None
+            continue
+        cells = _cells(line)
+        if head is None:
+            lead = next((i for i, c in enumerate(cells) if re.search(r"\blead", c, re.I)), None)
+            head = cells if lead is not None else False
+            continue
+        if not head or len(cells) != len(head) or cells[lead].lower() in NOBODY or len(out) >= limit:
+            continue
+        if not re.match(r"[A-Za-zÀ-ÿ]", cells[lead]) or re.search(r"[$€£]|\d{4}", cells[lead]):
+            continue   # cells out of step with the header: an amount or a date under "lead"
+        out.append(" · ".join(f"{h}: {c}" for h, c in zip(head, cells)
+                              if c and c.lower() not in NOBODY and not re.fullmatch(r"\d{5,}", c)))
+    return out
+
+
+async def company_leads(cala: Cala, name: str, ledger: Ledger | None = None, cache_only: bool = False) -> dict | None:
+    """For a company whose rounds the graph does not hold: the sentences that say who led a round of it, word for word,
+    from the passages Cala's knowledge search read, each with its page. Cala's own prose answer is not used."""
+    question = COMPANY_QUESTION.format(name=name)
+    d = await cala.call("POST", "/knowledge/search", body={"input": question}, ledger=ledger, cache_only=cache_only)
+    if d is None:
+        return None
+    keys = [k for k in pagecheck.company_keys(name) if len(k) > 2] or [_squash(name).strip()]
+    first = name.split()[0]
+    if len(first) >= 4 and first.lower() not in pagecheck.COMMON_FIRST:   # "Oura Health" is "Oura" in the press
+        keys.append(first)
+    names = lambda text: any(f" {_squash(k).strip()} " in f" {_squash(text)} " for k in keys)  # noqa: E731
+    quotes, seen = [], set()
+    for k in d.get("context") or []:
+        text = graph.fix_text(k.get("content") or "") or ""
+        src = None
+        for o in k.get("origins") or []:
+            doc, org = o.get("document") or {}, o.get("source") or {}
+            url = doc.get("url") or org.get("url")
+            if url:
+                m = re.match(r"https?://(?:www\.)?([^/]+)", url)
+                src = {"publisher": m.group(1) if m else (org.get("name") or "")[:60], "url": url,
+                       "title": (doc.get("name") or "")[:140]}
+                break
+        if not src or text.startswith("Entity: "):
+            continue
+        about = names(src["title"]) or names(re.sub(r"[-_/.]+", " ", src["url"]))   # the page is about this company
+        for part in text.split("[...]"):   # Cala joins excerpts of one page with this mark: never quote across it
+            for row in _table_rows(part) if about else []:
+                key = _squash(row)[:160]
+                if key not in seen:
+                    seen.add(key)
+                    quotes.append({"quote": row, "table": True, "rank": 1, **src})
+            for m in SAYS_LED.finditer(part):
+                lo, hi = pagecheck._sentence(part, m.start())
+                sent = re.sub(r"\s+", " ", part[lo:hi]).strip(" |#")
+                if not (20 <= len(sent) <= 420) or sent.count("|") > 1:
+                    continue
+                if not (names(sent) or (about and ITS_ROUND.match(sent))):
+                    continue
+                key = _squash(sent)[:160]
+                if key in seen or any(key[:60] in s for s in seen):
+                    continue
+                seen.add(key)
+                if hi >= len(part) and not re.search(r"[.!?\"”)]$", sent):
+                    sent += " …"   # the excerpt ends here, not the sentence
+                quotes.append({"quote": sent, "rank": 0 if names(sent) else 2, **src})
+    quotes.sort(key=lambda q: q.pop("rank"))
+    return {"question": question, "quotes": quotes[:6], "passages": len(d.get("context") or [])}

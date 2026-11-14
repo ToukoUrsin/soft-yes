@@ -11,11 +11,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from . import cala as cala_mod
-from . import extras, graph, mcp as mcp_mod, pagecheck, walk as walk_mod
+from . import extras, graph, knowledge, mcp as mcp_mod, pagecheck, walk as walk_mod
 from .cala import BASE, CREDIT_CAP, BudgetExceeded, CalaError, Ledger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +121,37 @@ async def lifespan(app: FastAPI):
 
 
 BACKGROUND: set[asyncio.Task] = set()   # walks that outlive the request that started them
+PATIENCE = 8.0   # seconds an answer may take before it is sent behind a trickle of spaces
+
+
+async def _patient(work) -> Response:
+    """A quick answer goes out as usual. A slow one starts the reply and sends a space every few seconds until the
+    JSON is ready: a proxy hangs up on a line that stays silent for a minute, and JSON may begin with spaces.
+    The work goes on if the reader leaves, so what it fetched is kept."""
+    task = asyncio.ensure_future(work)
+    BACKGROUND.add(task)
+    task.add_done_callback(BACKGROUND.discard)
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    done, _ = await asyncio.wait({task}, timeout=PATIENCE)
+    if done:
+        return JSONResponse(jsonable_encoder(task.result()))
+
+    async def body():
+        while not task.done():
+            yield b" "
+            await asyncio.wait({task}, timeout=PATIENCE)
+        try:
+            out = jsonable_encoder(task.result())
+        except HTTPException as exc:
+            out = {"failed": exc.status_code, "detail": str(exc.detail)}
+        except CalaError as exc:
+            out = {"failed": 503 if isinstance(exc, BudgetExceeded) else 502, "detail": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - the reply has started, so the failure travels in it
+            out = {"failed": 500, "detail": f"{type(exc).__name__}: {exc}"[:300]}
+        yield json.dumps(out, ensure_ascii=False).encode()
+
+    return StreamingResponse(body(), media_type="application/json",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Content-Encoding": "identity"})
 
 app = FastAPI(title="Soft Yes", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=800)  # event streams are left alone
@@ -452,6 +484,10 @@ async def run(run_id: str):
 @app.get("/api/investor")
 async def investor(ids: str, name: str = ""):
     """Investor check: does this investor lead or follow, and who leads when it follows?"""
+    return await _patient(_investor(ids, name))
+
+
+async def _investor(ids: str, name: str = "") -> dict:
     id_list = [i for i in ids.split(",") if len(i) == 36][:6]   # as many as a soft yes carries, so both share one walk
     if not id_list:
         raise HTTPException(400, "ids required")
@@ -502,41 +538,41 @@ async def draft(request: Request):
     result, lead = _lead(body.get("run_id", ""), body.get("lead_key", ""))
     kind = body.get("kind") if body.get("kind") in ("intro_ask", "direct", "slush") else "intro_ask"
     founder = {k: str((body.get("founder") or {}).get(k, ""))[:200] for k in ("company", "one_liner", "raising", "name")}
-    return await extras.draft(result, lead, kind, founder, llm=body.get("llm", True) is not False)
+    return await _patient(extras.draft(result, lead, kind, founder, llm=body.get("llm", True) is not False))
 
 
 @app.get("/api/says")
 async def says(run_id: str, lead_key: str):
     """What the lead says on its own site (Oxylabs + Gemini, quotes checked verbatim) next to what Cala shows it did."""
     result, lead = _lead(run_id, lead_key)
-    return await extras.says(cala_mod.get(), lead)
+    return await _patient(extras.says(cala_mod.get(), lead))
 
 
 @app.get("/api/conflicts")
 async def conflicts(run_id: str, lead_key: str, company_id: str = "", about: str = ""):
     result, lead = _lead(run_id, lead_key)
-    return await extras.conflicts(cala_mod.get(), lead, company_id or ((result["input"].get("company") or {}).get("id") or ""),
-                                  about[:300])
+    return await _patient(extras.conflicts(
+        cala_mod.get(), lead, company_id or ((result["input"].get("company") or {}).get("id") or ""), about[:300]))
 
 
 @app.get("/api/ask")
 async def ask(run_id: str, lead_key: str, q: str = ""):
     """One cited answer from Cala's knowledge search about this lead."""
     result, lead = _lead(run_id, lead_key)
-    return await extras.ask(cala_mod.get(), lead, q[:200])
+    return await _patient(extras.ask(cala_mod.get(), lead, q[:200]))
 
 
 @app.get("/api/references")
 async def references(run_id: str, lead_key: str):
     """Founders whose rounds this lead led, named by Cala: who to call for a reference."""
     result, lead = _lead(run_id, lead_key)
-    return await extras.references(cala_mod.get(), lead)
+    return await _patient(extras.references(cala_mod.get(), lead))
 
 
 @app.get("/api/slush")
 async def slush(run_id: str, lead_key: str):
     result, lead = _lead(run_id, lead_key)
-    return await extras.slush(lead)
+    return await _patient(extras.slush(lead))
 
 
 def _load_annotated(run_id: str) -> dict | None:
@@ -545,7 +581,7 @@ def _load_annotated(run_id: str) -> dict | None:
 
 
 MCP = mcp_mod.Server(suggest=lambda name: suggest(name), run=lambda inputs, emit: _run(inputs, emit), load=_load_annotated,
-                     check=lambda name: check(q=name))
+                     check=lambda name: _check(q=name))
 
 
 @app.post("/mcp")
@@ -605,6 +641,10 @@ async def audit():
 @app.get("/api/check")
 async def check(q: str = "", id: str = ""):
     """The page check for any company: its rounds in Cala, who Cala says led each, and what the cited pages say."""
+    return await _patient(_check(q, id))
+
+
+async def _check(q: str = "", id: str = "") -> dict:
     c = cala_mod.get()
     q, matches = q.strip()[:80], []
     name = ""
@@ -640,6 +680,12 @@ async def check(q: str = "", id: str = ""):
         raise HTTPException(503 if isinstance(exc, BudgetExceeded) else 502, str(exc))
     out["company"]["description"] = next((m["description"] for m in matches if m["id"] == id), None)
     out["matches"], out["q"] = matches, q
+    if not out["rounds"]:
+        # The graph holds no round for it. Ask Cala's knowledge search, and keep only sentences from the pages it read.
+        try:
+            out["knowledge"] = await knowledge.company_leads(c, out["company"]["name"])
+        except CalaError:
+            out["knowledge"] = None
     if out["page_check"]["claims"]:
         extras.blob_put("check:" + id, {"page_check": out["page_check"]})
     return out

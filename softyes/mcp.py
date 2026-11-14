@@ -158,10 +158,14 @@ class Server:
         co = d["company"]["name"]
         if not d["rounds"]:
             n = d.get("investors_in_cala")
-            return {"content": [{"type": "text", "text": f"Cala holds no funding rounds for {co}"
-                                 + (f", only {n} investors without their rounds, so there is no lead claim to check."
-                                    if n else ".")}], "isError": False,
-                    "structuredContent": {"company": co, "rounds": []}}
+            text = f"Cala's graph holds no funding rounds for {co}" + (
+                f", only {n} investors without their rounds, so there is no lead claim to check." if n else ".")
+            quotes = (d.get("knowledge") or {}).get("quotes") or []
+            if quotes:
+                text += "\n\nCala's knowledge search read these pages. What they say about who led, word for word:\n\n" + \
+                    "\n".join(f"- \"{q['quote']}\" ([{q['publisher']}]({q['url']}))" for q in quotes)
+            return {"content": [{"type": "text", "text": text}], "isError": False,
+                    "structuredContent": {"company": co, "rounds": [], "said_on_pages": quotes}}
         out, rows = [f"# {co}: who led, by the page Cala cites", ""], []
         for r in d["rounds"]:
             head = " ".join(x for x in (r["stage_name"], (r.get("date") or "")[:7]) if x)
