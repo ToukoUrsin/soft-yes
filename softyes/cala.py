@@ -20,7 +20,7 @@ import httpx
 
 BASE = "https://api.cala.ai/v1"
 ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = ROOT / "data" / "cache.db"
+DB_PATH = Path(os.environ.get("SOFTYES_DB") or ROOT / "data" / "cache.db")  # the public host keeps it on a volume
 PER_MINUTE = int(os.environ.get("CALA_PER_MINUTE", "80"))
 CREDIT_CAP = int(os.environ.get("CALA_CREDIT_CAP", "3060"))  # fresh calls allowed since PLAN_START
 PLAN_START = float(os.environ.get("CALA_PLAN_START", "1794611220"))  # 2026-11-13T23:07Z, first credit pack
@@ -56,7 +56,7 @@ class Ledger:
 
 class Cala:
     def __init__(self) -> None:
-        DB_PATH.parent.mkdir(exist_ok=True)
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute(

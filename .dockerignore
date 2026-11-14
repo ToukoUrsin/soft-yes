@@ -1,0 +1,6 @@
+*
+!softyes
+!web/dist
+!deploy/fly/seed.db
+!deploy/fly/requirements.txt
+**/__pycache__

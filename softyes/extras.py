@@ -581,7 +581,8 @@ async def slush_firms() -> dict[str, dict]:
     global _firms
     if _firms is not None:
         return _firms
-    hit = blob_get("slush:firms", max_age=12 * 3600)
+    # Only the machine holding the Slush sign-in refreshes the list; any other host serves the copy it was given.
+    hit = blob_get("slush:firms", max_age=12 * 3600 if slush_mcp.ready() else None)
     if hit is None and slush_mcp.ready():
         try:
             hit = await slush_mcp.investors()

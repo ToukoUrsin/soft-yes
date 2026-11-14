@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from . import cala as cala_mod
@@ -96,6 +97,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Soft Yes", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=800)  # event streams are left alone
 
 
 def _credits() -> dict:
