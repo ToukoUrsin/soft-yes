@@ -45,10 +45,8 @@ EXAMPLES = [
 # Real companies, walked from the investors Cala lists in them. `ids`: the Cala entities the company is held under.
 REAL = [
     {"id": "cala", "ids": ["81cfdabc-53f7-426a-b358-a942e159ca0f", "2bdea5e8-a630-4098-9fb1-3f84bbaa77a2"]},
-    {"id": "context", "ids": ["d6caeb7d-27ca-4967-b7f3-86b207310fa0"]},
     {"id": "flow", "ids": ["f1970456-a6e4-4b95-91a8-58c5a92d9bfe"]},
     {"id": "verda", "ids": ["3d3edba6-f4d7-432b-80d3-d07872e11def"]},
-    {"id": "afterquery", "ids": ["f50e8c58-4d32-4395-978b-5f0be8cfa7d8"]},
 ]
 
 INDEX: dict[str, dict] = {}   # norm(name) -> {key, name, ids, kind, type, description, rounds}

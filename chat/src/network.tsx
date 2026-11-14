@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { callTool, say, tell } from './bridge'
-import { type Net, type NetworkData, listAnd, num, plural, reduced } from './lib'
+import { DraftBody, writeAsk } from './cards'
+import { type DraftData, type Net, type NetworkData, listAnd, num, plural, reduced } from './lib'
 import { Btn, Count, Head, Icon, Ledger, Link, Seg, useWidth } from './ui'
 
 interface Fund {
@@ -61,6 +62,7 @@ export function Network({ data, roomy, canExpand, onExpand, onBack }: {
   const [hop, setHop] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [ask, setAsk] = useState<{ key: string; data: DraftData } | null>(null)
   const [inn, setIn] = useState(reduced())
   const leadKeys = useMemo(() => new Map(d.leads.map((l) => [l.key, l])), [d])
 
@@ -119,6 +121,12 @@ export function Network({ data, roomy, canExpand, onExpand, onBack }: {
 
   const draft = async (f: Fund, door: string) => {
     setBusy(true)
+    const got = await writeAsk({ run_id: d.run_id, lead: f.name, company: d.company })
+    if (got) {
+      setAsk({ key: f.key, data: got })
+      setBusy(false)
+      return
+    }
     const sent = await say(`Draft the intro ask to ${door} about ${f.name} with Soft Yes (run ${d.run_id}), and save it to my drafts.`)
     setBusy(false)
     if (!sent) setErr(`Ask in the chat: “Draft the intro ask to ${door} about ${f.name}.”`)
@@ -217,6 +225,7 @@ export function Network({ data, roomy, canExpand, onExpand, onBack }: {
               </li>
             ))}
           </ul>
+          {ask?.key === current.key ? <div class="ask"><DraftBody data={ask.data} onClose={() => setAsk(null)} /></div> : (
           <div class="acts">
             {leadKeys.has(current.key) && !hopped && current.doors.size > 0 && (
               <Btn kind="main" icon="mail" busy={busy}
@@ -226,6 +235,7 @@ export function Network({ data, roomy, canExpand, onExpand, onBack }: {
             )}
             <Btn icon="hop" onClick={() => walkOut(current)}>One hop from {current.name.split(' ').slice(0, 2).join(' ')}</Btn>
           </div>
+          )}
         </section>
       )}
       {err && <p class="banner">{err}</p>}

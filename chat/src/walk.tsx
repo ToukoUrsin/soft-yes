@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { say, tell } from './bridge'
-import { type Fix, type Lead, type Round, type Soft, type WalkData, listAnd, month, num, ok, plural, reduced, roundName, wrong } from './lib'
+import { DraftBody, writeAsk } from './cards'
+import { type DraftData, type Fix, type Lead, type Round, type Soft, type WalkData, listAnd, month, num, ok, plural, reduced, roundName, wrong } from './lib'
 import { Btn, Count, Head, Icon, Ledger, Link, Quote, Src, useWidth } from './ui'
 
 interface LeadRow { key: string; name: string; state: 'ok' | 'wrong' | 'open'; page?: string[]; rank?: number; quote?: string; publisher?: string; struckFor?: string }
@@ -230,8 +231,9 @@ function Pill({ l }: { l: Lead }) {
   return <span class="pill">{l.tier_label || 'On record'}</span>
 }
 
-function LeadCard({ l, open, onToggle, onDraft, onNet, busy, short, full }: {
+function LeadCard({ l, open, onToggle, onDraft, onNet, busy, short, full, ask, onCloseAsk }: {
   l: Lead; open: boolean; onToggle: () => void; onDraft: (l: Lead) => void; onNet: (l: Lead) => void; busy: boolean; short: boolean; full: boolean
+  ask?: DraftData; onCloseAsk: () => void
 }) {
   const e = l.evidence[0]
   const proven = ok(e?.status)
@@ -274,10 +276,12 @@ function LeadCard({ l, open, onToggle, onDraft, onNet, busy, short, full }: {
             </ul>
           )}
           {l.caution && <p class="caution">{l.caution}</p>}
-          <div class="acts">
-            <Btn kind="main" icon="mail" busy={busy} onClick={() => onDraft(l)}>Draft the ask{l.door && !short ? ` to ${l.door.name}` : ''}</Btn>
-            <Btn icon="net" onClick={() => onNet(l)}>{short ? 'Who else opens it' : 'Who else opens this door'}</Btn>
-          </div>
+          {ask ? <div class="ask"><DraftBody data={ask} onClose={onCloseAsk} proofAbove={!!e?.quote} /></div> : (
+            <div class="acts">
+              <Btn kind="main" icon="mail" busy={busy} onClick={() => onDraft(l)}>Draft the ask{l.door && !short ? ` to ${l.door.name}` : ''}</Btn>
+              <Btn icon="net" onClick={() => onNet(l)}>{short ? 'Who else opens it' : 'Who else opens this door'}</Btn>
+            </div>
+          )}
         </div>
       )}
     </li>
@@ -338,6 +342,7 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
   const [all, setAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  const [asks, setAsks] = useState<Record<string, DraftData>>({})
   const [run, setRun] = useState(0)
   const timers = useRef<number[]>([])
   const wide = width >= 560
@@ -378,6 +383,13 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
   const names = d.softs.map((s) => s.name)
   const draft = async (l: Lead) => {
     setBusy(l.key)
+    const got = await writeAsk({ run_id: d.run_id, lead: l.name, kind: l.door ? 'intro_ask' : 'direct', company: d.company, raising: d.stage_name })
+    if (got) {
+      setAsks((a) => ({ ...a, [l.key]: got }))
+      setBusy(null)
+      setNote(null)
+      return
+    }
     const to = l.door?.name
     const text = to
       ? `Draft the intro ask to ${to} about ${l.name} with Soft Yes (run ${d.run_id}), and save it to my drafts.`
@@ -433,7 +445,8 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
         <ol class="leads is-in">
           {shown.map((l) => (
             <LeadCard key={l.key} l={l} short={!wide} full={roomy} open={open === l.key} onToggle={() => setOpen(open === l.key ? null : l.key)}
-              onDraft={draft} onNet={(x) => onNetwork(x.key)} busy={busy === l.key} />
+              onDraft={draft} onNet={(x) => onNetwork(x.key)} busy={busy === l.key}
+              ask={asks[l.key]} onCloseAsk={() => setAsks(({ [l.key]: _, ...rest }) => rest)} />
           ))}
         </ol>
       )}

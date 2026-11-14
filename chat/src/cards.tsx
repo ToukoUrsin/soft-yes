@@ -1,24 +1,38 @@
 // The smaller cards: the intro ask, where the round stands, and a claim checked against its page.
 
 import { useEffect, useState } from 'preact/hooks'
-import { callTool, say, tell } from './bridge'
+import { callTool, openLink, say, tell } from './bridge'
 import { type ClaimData, type DraftData, type TrackerData, STATUS_WORD, day, listAnd, money, month, num, ok, plural, roundName, wrong } from './lib'
 import { Btn, Head, Icon, Ledger, Link, Quote, Src } from './ui'
 
 // ---------------------------------------------------------------------------------------------- the ask
 
-export function Draft({ data: d }: { data: DraftData }) {
-  const [state, setState] = useState<'idle' | 'saving' | 'asked' | 'copied' | 'failed'>('idle')
+/** Has the connector write the ask from the run's checked facts; null when the chat does not let a card call tools. */
+export async function writeAsk(args: { run_id: string; lead: string; kind?: string; company?: string | null; raising?: string | null }): Promise<DraftData | null> {
+  try {
+    const clean = Object.fromEntries(Object.entries(args).filter(([, v]) => v))
+    const r = await callTool('draft_intro', clean, 60_000)
+    return !r.isError && r.structuredContent?.view === 'draft' ? (r.structuredContent as DraftData) : null
+  } catch {
+    return null
+  }
+}
+
+function askTitle(d: DraftData) {
   const to = d.to.name ? `${d.to.name}${d.to.fund ? `, ${d.to.fund}` : ''}` : d.to.fund || d.lead.name
   const kind = d.kind === 'intro_ask' ? 'Intro ask' : d.kind === 'direct' ? 'Note to the lead' : 'Slush meeting note'
+  return { to, kind }
+}
+
+/** The ask itself: the mail, every fact in it with its source, and the ways out. `onClose` when it sits inside another card. */
+export function DraftBody({ data: d, onClose, proofAbove }: { data: DraftData; onClose?: () => void; proofAbove?: boolean }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const { to, kind } = askTitle(d)
   const text = (d.subject ? `Subject: ${d.subject}\n\n` : '') + d.body
 
-  const save = async () => {
-    setState('saving')
-    const sent = await say(
-      `Save this as a draft in my mail${d.to.email ? ` to ${d.to.email}` : d.to.name ? ` to ${d.to.name}` : ''}, exactly as written, and do not send it.\n\n${text}`,
-    )
-    setState(sent ? 'asked' : 'failed')
+  const gmail = () => {
+    const q = [d.to.email ? `to=${encodeURIComponent(d.to.email)}` : '', d.subject ? `su=${encodeURIComponent(d.subject)}` : '', `body=${encodeURIComponent(d.body)}`]
+    openLink(`https://mail.google.com/mail/?view=cm&fs=1&${q.filter(Boolean).join('&')}`)
   }
   const copy = async () => {
     try {
@@ -35,12 +49,17 @@ export function Draft({ data: d }: { data: DraftData }) {
     }
   }
   useEffect(() => {
-    tell(`The Soft Yes draft to ${to} about ${d.lead.name} is on screen. It was written from checked facts only.`)
+    tell(`The Soft Yes ${kind.toLowerCase()} to ${to} about ${d.lead.name} is on screen, written from checked facts only. If asked to save it as a mail draft, save exactly this and do not send it:\n\n${text}`)
   }, [d])
 
   return (
-    <div class="card card--draft">
-      <Head title={`${kind} to ${to}`} sub={<>About <b>{d.lead.name}</b>. Written only from the facts below. You send it.</>} />
+    <>
+      {onClose && (
+        <div class="ask__top">
+          <p><b>{kind} to {to}</b><span>Written only from the facts below. You send it.</span></p>
+          <button type="button" class="tool" onClick={onClose}><Icon name="x" size={13} />Close</button>
+        </div>
+      )}
       <article class="mail">
         {d.to.email && <p class="mail__row"><span>To</span><b>{d.to.email}</b></p>}
         {d.subject && <p class="mail__row"><span>Subject</span><b>{d.subject}</b></p>}
@@ -54,7 +73,7 @@ export function Draft({ data: d }: { data: DraftData }) {
           {d.facts.map((f) => <li key={f}><Src kind="cala" /><span>{f}</span></li>)}
           {d.yours.map((f) => <li key={f}><Src kind="typed" label="You" /><span>{f}</span></li>)}
         </ul>
-        {d.proof[0]?.quote && (
+        {d.proof[0]?.quote && !proofAbove && (
           <figure class="proof">
             <Quote text={d.proof[0].quote} names={[d.lead.name]} />
             <figcaption><Src kind="page" label="The page says it led" /><Link href={d.proof[0].url}>{d.proof[0].publisher || 'source'}</Link></figcaption>
@@ -67,10 +86,20 @@ export function Draft({ data: d }: { data: DraftData }) {
       </section>
 
       <div class="acts">
-        <Btn kind="main" icon="mail" busy={state === 'saving'} onClick={save}>{state === 'asked' ? 'Asked Claude to save it' : 'Save to my drafts'}</Btn>
-        <Btn icon={state === 'copied' ? 'check' : 'copy'} onClick={copy}>{state === 'copied' ? 'Copied' : 'Copy'}</Btn>
+        {d.kind !== 'slush' && <Btn kind="main" icon="mail" onClick={gmail}>Open in Gmail</Btn>}
+        <Btn kind={d.kind === 'slush' ? 'main' : 'quiet'} icon={state === 'copied' ? 'check' : 'copy'} onClick={copy}>{state === 'copied' ? 'Copied' : 'Copy'}</Btn>
       </div>
-      {state === 'failed' && <p class="banner">Ask in the chat: “Save that as a draft in my mail.”</p>}
+      {state === 'failed' && <p class="banner">Select the text above and copy it by hand.</p>}
+    </>
+  )
+}
+
+export function Draft({ data: d }: { data: DraftData }) {
+  const { to, kind } = askTitle(d)
+  return (
+    <div class="card card--draft">
+      <Head title={`${kind} to ${to}`} sub={<>About <b>{d.lead.name}</b>. Written only from the facts below. You send it.</>} />
+      <DraftBody data={d} />
       <footer class="foot"><span /><Link href={d.url} class="foot__r">Every round and source</Link></footer>
     </div>
   )
@@ -85,6 +114,7 @@ export function Tracker({ data }: { data: TrackerData }) {
   const [open, setOpen] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [asks, setAsks] = useState<Record<string, DraftData>>({})
   useEffect(() => setD(data), [data])
 
   const lead = d.leads.find((l) => l.status === 'leading')
@@ -109,6 +139,12 @@ export function Tracker({ data }: { data: TrackerData }) {
   }
   const draft = async (name: string, via?: string | null) => {
     setBusy(name)
+    const got = await writeAsk({ run_id: d.run_id, lead: name, company: d.company, raising: d.stage_name })
+    if (got) {
+      setAsks((a) => ({ ...a, [name]: got }))
+      setBusy(null)
+      return
+    }
     const sent = await say(`Draft the intro ask ${via ? `to ${via} ` : ''}about ${name} with Soft Yes (run ${d.run_id}), and save it to my drafts.`)
     setBusy(null)
     if (!sent) setErr(`Ask in the chat: “Draft the intro ask about ${name}.”`)
@@ -162,7 +198,8 @@ export function Tracker({ data }: { data: TrackerData }) {
                     </button>
                   ))}
                 </div>
-                {l.status === 'to_ask' && <Btn kind="main" icon="mail" busy={busy === l.name} onClick={() => draft(l.name, l.via)}>Draft the ask</Btn>}
+                {l.status === 'to_ask' && !asks[l.name] && <Btn kind="main" icon="mail" busy={busy === l.name} onClick={() => draft(l.name, l.via)}>Draft the ask</Btn>}
+                {asks[l.name] && <div class="ask"><DraftBody data={asks[l.name]} onClose={() => setAsks(({ [l.name]: _, ...rest }) => rest)} /></div>}
               </div>
             )}
           </li>

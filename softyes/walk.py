@@ -714,7 +714,7 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
     if recent:
         read, ok = (p or {}).get("led_recent_read") or 0, (p or {}).get("led_recent_on_page") or 0
         out.append({"tone": "good", "text": f"Cala has it leading {_plural(recent, 'round')} in the last {RECENT_MONTHS} months"
-                                            + (f"; the pages read so far confirm {ok} of {read}" if read else "")})
+                                            + (f"; pages were read for {read} of them and {ok} say it led" if read else "")})
     elif p and p["rounds"]:
         out.append({"tone": "warn", "text": f"No lead dated in the last {RECENT_MONTHS} months in Cala"})
     if p and p["rounds"] >= 3:

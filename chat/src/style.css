@@ -203,6 +203,15 @@ b { font-weight: 600; }
 .caution { font-size: 13px; color: var(--bad); }
 
 .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* the ask, opened inside the card it was asked from */
+.ask { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-top: 4px; animation: rise .35s var(--ease); }
+.ask__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ask__top p { margin: 0; display: grid; gap: 2px; min-width: 0; }
+.ask__top b { font-weight: 600; color: var(--ink); }
+.ask__top span { color: var(--ink3); font-size: 12px; }
+.ask .facts { margin-top: 0; }
+.trk__body .ask { margin-top: 10px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; max-width: 100%; height: 32px; padding: 0 12px; border-radius: var(--r-md); font-size: 13px; font-weight: 550; white-space: nowrap; transition: background .15s, border-color .15s, opacity .15s, transform .1s; }
 .btn:active:not(:disabled) { transform: scale(.98); }
 .btn--main { background: var(--ink); color: var(--inv); }

@@ -194,7 +194,7 @@ def cala_facts(result: dict, lead: dict) -> list[str]:
     if p and p["rounds"]:
         facts.append(f"Cala has {p['rounds']} funding rounds for {name} and marks it as lead in {p['led']} of them"
                      + (f", {p['led_recent']} in the last {p['recent_months']} months." if p["led_recent"] else ".")
-                     + (f" The cited pages read so far confirm {p['led_on_page']} of {p['led_read']}." if p.get("led_read") else ""))
+                     + (f" Pages were read for {p['led_read']} of the {p['led']}, and {p['led_on_page']} say it led." if p.get("led_read") else ""))
     if lead.get("last_led"):
         facts.append(f"The most recent round {name} led in Cala: {deal_phrase(lead['last_led'])}.")
     for s in result["soft_yeses"]:
