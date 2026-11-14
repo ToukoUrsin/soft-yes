@@ -379,11 +379,14 @@ function SoftYesAsk({ config }: { config: Config | null }) {
         </p>
         {config?.mcp && (
           <div className="home__mcp">
-            <p>Use it inside Claude. Add this address as a custom connector (Customize, Connectors) and ask who could lead your round. The walk draws in your chat.</p>
+            <p>Use it inside Claude. Add this address as a custom connector (Customize, Connectors) and ask which investors fit your round, or who could lead it. The answer draws in your chat.</p>
             <div className="copyfield">
               <code className="truncate" title={config.mcp}>{config.mcp}</code>
               <CopyButton text={config.mcp} label="Copy" className="btn btn--ghost btn--sm" />
             </div>
+            <p>
+              <a className="link" href="/chat">See it without Claude</a> · <a className="link" href="/film.mp4">Watch the film (69 s)</a>
+            </p>
           </div>
         )}
       </div>
