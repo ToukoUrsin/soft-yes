@@ -237,6 +237,9 @@ function LeadCard({ l, open, onToggle, onDraft, onNet, busy, short, full, ask, o
 }) {
   const e = l.evidence[0]
   const proven = ok(e?.status)
+  // the first reason is the line under the name already; the line on the asked stage is always shown, it is why the order is what it is
+  const some = l.why.slice(full ? 0 : 1, 3)
+  const reasons = l.fit_line && !some.includes(l.fit_line) ? [...some, l.fit_line] : some
   return (
     <li class={`lead${open ? ' is-open' : ''}`}>
       <button type="button" class="lead__head" onClick={onToggle} aria-expanded={open}>
@@ -270,9 +273,9 @@ function LeadCard({ l, open, onToggle, onDraft, onNet, busy, short, full, ask, o
               </figcaption>
             </figure>
           )}
-          {l.why.length > (full ? 0 : 1) && (
+          {reasons.length > 0 && (
             <ul class="why">
-              {l.why.slice(full ? 0 : 1, 3).map((w) => <li key={w}><Icon name="cala" size={12} />{w}</li>)}
+              {reasons.map((w) => <li key={w}><Icon name="cala" size={12} />{w}</li>)}
             </ul>
           )}
           {l.caution && <p class="caution">{l.caution}</p>}
@@ -310,7 +313,7 @@ function Inbox({ softs }: { softs: Soft[] }) {
   )
 }
 
-function Fixes({ fixes }: { fixes: Fix[] }) {
+export function Fixes({ fixes }: { fixes: Fix[] }) {
   if (!fixes.length) return null
   return (
     <section class="fixes">
@@ -330,7 +333,7 @@ function Fixes({ fixes }: { fixes: Fix[] }) {
 
 /** A chat takes a card off the page when it scrolls away and puts it back later. The walk draws itself once per call;
  *  put back, it is simply there. */
-function drawn(id: string, set?: boolean): boolean {
+export function drawn(id: string, set?: boolean): boolean {
   if (!id) return false
   try {
     if (set) sessionStorage.setItem(`sy:drawn:${id}`, '1')

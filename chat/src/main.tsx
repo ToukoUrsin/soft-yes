@@ -2,7 +2,8 @@ import { render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { type HostContext, type ToolResult, applyHost, askDisplay, callTool, connect, on, reportSize } from './bridge'
 import { Claim, Draft, Tracker } from './cards'
-import type { Data, NetworkData, WalkData } from './lib'
+import { Find, FindWait } from './find'
+import type { Data, FindProgress, NetworkData, WalkData } from './lib'
 import { Network } from './network'
 import { Head } from './ui'
 import { Walk, WalkWait } from './walk'
@@ -18,6 +19,13 @@ function progressKey(args: any): string {
   return `${set.join('|')}|${norm(String(args?.company || ''))}|${String(args?.stage || '').toLowerCase()}`.replace(/[^a-z0-9|]+/g, '')
 }
 
+function findKey(a: any): string {
+  // the same key the server makes for an investor search
+  const part = (v: any) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const many = (v: any) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v : []).map(part).filter(Boolean).sort().join(',')
+  return `find|${[part(a?.sector), part(a?.stage), part(a?.place), many(a?.like), many(a?.investors), part(a?.company)].join('|')}`
+}
+
 function networkOf(w: WalkData, focus?: string): NetworkData {
   return {
     view: 'network', run_id: w.run_id, url: w.url, company: w.company, focus: focus ?? null, path: [],
@@ -28,6 +36,7 @@ function networkOf(w: WalkData, focus?: string): NetworkData {
 }
 
 function Wait({ tool, args, progress }: { tool: string; args: any; progress: any }) {
+  if (tool === 'find_investors' || (!tool && (args?.sector || args?.like))) return <FindWait args={args} progress={progress} />
   if (tool === 'find_lead' || (!tool && (args?.investors || args?.soft_yeses))) return <WalkWait args={args} progress={progress} />
   const title = tool === 'explore_network' ? 'Reading the network from Cala' : tool === 'draft_intro' ? 'Writing the ask from checked facts'
     : tool === 'round_tracker' ? 'Opening the round' : tool === 'check_claim' ? 'Reading the page Cala cites' : 'Soft Yes'
@@ -72,14 +81,15 @@ function App() {
   const tool = ctx.toolInfo?.tool?.name || ''
   const cardId = ctx.toolInfo?.id != null ? String(ctx.toolInfo.id) : ''   // one per call the assistant made
   // while the walk is out, ask the server how far it has got
+  const finding = tool === 'find_investors' || (!tool && !!(args?.sector || args?.like))
   useEffect(() => {
-    if (data || fail || !args || (tool && tool !== 'find_lead')) return
-    const key = progressKey(args)
+    if (data || fail || !args || (tool && tool !== 'find_lead' && tool !== 'find_investors')) return
+    const key = finding ? findKey(args) : progressKey(args)
     let live = true
     const poll = async () => {
       if (!live || got.current) return
       try {
-        const r = await callTool('walk_progress', { key }, 8000)
+        const r = await callTool(finding ? 'find_progress' : 'walk_progress', { key }, 8000)
         if (live && r.structuredContent?.state && r.structuredContent.state !== 'none') setProgress(r.structuredContent)
       } catch { /* a host that keeps the card from calling tools: the plain wait is shown */ }
       if (live && !got.current) window.setTimeout(poll, 1200)
@@ -87,6 +97,25 @@ function App() {
     const t = window.setTimeout(poll, 900)
     return () => { live = false; clearTimeout(t) }
   }, [args, data, fail, tool])
+  // a search that outlasted the assistant's wait goes on at the server: the card asks for it until the list is there
+  const waitKey = data?.view === 'find' && data.pending ? data.key : null
+  useEffect(() => {
+    if (!waitKey) return
+    let live = true
+    const poll = async () => {
+      if (!live) return
+      try {
+        const sc = (await callTool('find_progress', { key: waitKey }, 8000)).structuredContent as FindProgress | undefined
+        if (!live) return
+        if (sc?.result) { setData(sc.result); return }
+        if (sc?.state && sc.state !== 'none') setProgress(sc)
+        if (sc?.state === 'failed' || sc?.state === 'none') return
+      } catch { /* asked again below */ }
+      if (live) window.setTimeout(poll, 1500)
+    }
+    const t = window.setTimeout(poll, 600)
+    return () => { live = false; clearTimeout(t) }
+  }, [waitKey])
 
   const full = ctx.displayMode === 'fullscreen'
   const canExpand = !full && (ctx.availableDisplayModes || []).includes('fullscreen')
@@ -119,6 +148,9 @@ function App() {
   if (!data) return <Wait tool={tool} args={args} progress={progress} />
   if (side) return <Network data={side} roomy={full} canExpand={canExpand} onExpand={expand} onBack={() => setSide(null)} />
   switch (data.view) {
+    case 'find':
+      if (data.pending) return <FindWait args={args} ask={data.ask} queries={data.queries} progress={progress ?? data.progress ?? null} />
+      return <Find data={data} cardId={cardId} roomy={full} fit={level} canExpand={canExpand} onExpand={expand} />
     case 'walk':
       return <Walk data={data} cardId={cardId} roomy={full} fit={level} canExpand={canExpand} onExpand={expand}
         onNetwork={(focus) => setSide(networkOf(data, focus))} />

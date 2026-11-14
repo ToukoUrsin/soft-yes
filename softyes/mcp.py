@@ -15,7 +15,7 @@ import secrets
 import time
 from typing import Awaitable, Callable
 
-from . import chat, extras, graph, walk
+from . import chat, extras, graph, scout, walk
 
 PUBLIC_URL = os.environ.get("SOFTYES_PUBLIC_URL", "https://soft-yes.fly.dev").rstrip("/")
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -29,6 +29,27 @@ def _stage_code(v) -> str | None:
     return code if code in STAGES else None
 FIRST_ANSWER_S = 45   # an assistant should not wait longer than this; the rest is on the run's page
 STORED_FOR_S = 6 * 3600   # a walk stored this recently is given as it is; the cards open at once
+SEARCH_STORED_S = 3 * 86400   # an investor search stored this recently is given as it is
+SECTORS = {"ai": "artificial intelligence", "a.i.": "artificial intelligence", "genai": "generative ai", "gen ai": "generative ai",
+           "ml": "machine learning", "climate": "climate tech", "climatetech": "climate tech", "health": "health tech",
+           "healthtech": "health tech", "bio": "biotech", "biotechnology": "biotech", "saas": "software as a service",
+           "defence": "defense", "defence tech": "defense tech", "deep tech": "deeptech"}
+
+
+def _sector(v) -> str:
+    """'AI startups' and 'an AI lab' are the field 'artificial intelligence': one stored search answers them all."""
+    s = re.sub(r"\s+", " ", re.sub(r"[^\w &+/'-]", " ", str(v or "").lower())).strip()
+    s = re.sub(r"^(an?|the|my|our) ", "", s)
+    s = re.sub(r" (start-?ups?|compan(y|ies)|labs?|industry|sector|space|businesse?s?|products?|tools?)$", "", s).strip()
+    return SECTORS.get(s, s)[:60]
+
+
+def _find_key(args: dict) -> str:
+    """One key for a search as the assistant asked for it, so the card can ask how far the same search has got."""
+    part = lambda v: re.sub(r"[^a-z0-9]+", "", str(v or "").lower())  # noqa: E731
+    many = lambda v: ",".join(sorted(part(x) for x in ([v] if isinstance(v, str) else v or []) if part(x)))  # noqa: E731
+    return "find|" + "|".join([part(args.get("sector")), part(args.get("stage")), part(args.get("place")), many(args.get("like")),
+                               many(args.get("investors")), part(args.get("company"))])
 
 # The card. One fixed address: a chat host keeps a connector's tool list for the session, so the address must not move.
 UI_URI = "ui://soft-yes/app.html"
@@ -41,9 +62,15 @@ READS = {"readOnlyHint": True, "openWorldHint": True}
 TIER_LABEL = {t["id"]: t["label"].lower() for t in walk.TIERS}
 
 INSTRUCTIONS = (
-    "Soft Yes gets a founder from investors who said \"we're in once you have a lead\" to a lead and a filled round. "
+    "Soft Yes finds a founder the investors for their round from Cala's funding graph, and gets them from investors who "
+    "said \"we're in once you have a lead\" to a lead and a filled round. "
     "Every fact comes from Cala's funding graph and is checked against the page Cala cites. No fact is stated by a "
     "language model, so add none of your own.\n\n"
+    "0. No soft yes yet, or the founder asks which investors fit what they build (\"find me pre-seed investors for an AI "
+    "company\", \"who invests in companies like ours\", \"who could X's investors introduce me to\"): call find_investors "
+    "right away with the field in two or three plain words, the stage and the place if they said them, companies like "
+    "theirs if they named any, and the investors or the company they already know. Do not ask questions first. It draws "
+    "the list in the chat with each investor's signals, so do not repeat it.\n"
     "1. The soft yeses. If the founder names the investors, call find_lead with those names right away. If they ask "
     "about a company by name, call find_lead with company right away. In both cases do not search mail first, do not "
     "ask which company it is for, and use only what is said in this chat, nothing from memory. Only when they name "
@@ -66,6 +93,13 @@ INSTRUCTIONS = (
 # Starter questions. A chat lists them under the connector (in Claude: + > Soft Yes), so nobody has to know what to type.
 # Each one is only the founder's sentence; left empty, it asks with an example that is known to hold.
 PROMPTS = [
+    {"name": "find-investors", "title": "Find investors for what I build",
+     "description": "From the field, the stage and the place: who backs companies like yours, who leads, who is active now. "
+                    "Leave it empty to try pre-seed artificial intelligence in Europe.",
+     "arguments": [{"name": "field", "description": "What you build, e.g. artificial intelligence", "required": False},
+                   {"name": "round", "description": "The round, e.g. Pre-seed or Seed", "required": False},
+                   {"name": "place", "description": "Where, e.g. Europe or Finland", "required": False},
+                   {"name": "know", "description": "A company whose investors you know, e.g. Cala AI", "required": False}]},
     {"name": "find-a-lead", "title": "Find who could lead my round",
      "description": "From the investors who said they're in once you have a lead. Leave it empty to try Tesi and Innovestor.",
      "arguments": [{"name": "investors", "description": "Who said yes, e.g. Tesi, Innovestor", "required": False},
@@ -96,6 +130,14 @@ def _spoken(v, default: str) -> str:
 
 def _prompt_text(name: str, args: dict) -> str | None:
     company = str(args.get("company") or "").strip() or "Cala AI"
+    if name == "find-investors":
+        what = str(args.get("field") or "").strip() or "artificial intelligence"
+        rnd = str(args.get("round") or "").strip().lower().removesuffix(" round") or "pre-seed"
+        place = str(args.get("place") or "").strip() or ("" if args.get("field") else "Europe")
+        know = str(args.get("know") or "").strip()
+        return (f"We're building in {what}{' in ' + place if place else ''} and raising a {rnd} round. "
+                f"Use Soft Yes to find the investors who fit"
+                + (f", and who {know}'s investors could introduce us to." if know else "."))
     if name == "find-a-lead":
         given = str(args.get("investors") or "").strip()
         rnd = str(args.get("round") or "").strip() or ("" if given else "Series A")
@@ -125,6 +167,27 @@ SOFT_YES = {"type": "object", "required": ["investor"], "properties": {
     "date": {"type": "string", "description": "When they wrote, YYYY-MM-DD"}}}
 
 TOOLS = [
+    {"name": "find_investors",
+     "title": "Find investors for what the founder builds",
+     "description": "Finds investors for a founder from what they build, before anyone has said yes. Cala names the "
+                    "companies in that field at that stage; from each one the funding graph is read (its rounds, who took "
+                    "part, who led), every \"led\" is checked against the page Cala cites, and each investor's own record "
+                    "in Cala is read. Returns investors ranked by signals counted from the graph: backed companies like "
+                    "the founder's, leads rounds, invests at this stage, active in the last 12 months, round size, where "
+                    "it sits, and a way in (a round it shared with an investor the founder already knows). Draws the "
+                    "search and the list in the chat. Give sector, or like, or both.",
+     "inputSchema": {"type": "object", "properties": {
+         "sector": {"type": "string", "description": "The field in two or three plain words, e.g. \"artificial intelligence\", "
+                                                     "\"climate tech\", \"fintech\""},
+         "stage": {"type": "string", "enum": STAGES, "description": "The round being raised"},
+         "place": {"type": "string", "description": "A country, a city or a region, e.g. \"Finland\", \"Europe\", \"Nordics\""},
+         "like": {"type": "array", "maxItems": 6, "items": {"type": "string"},
+                  "description": "Companies like the founder's, by name, e.g. [\"Mistral AI\", \"Aleph Alpha\"]"},
+         "investors": {"type": "array", "maxItems": 6, "items": {"type": "string"},
+                       "description": "Investors the founder already has or knows: the way in is looked for through them"},
+         "company": {"type": "string", "description": "A company whose investors the founder knows or can ask, e.g. their "
+                                                     "own or a friend's: the way in is looked for through its investors"}}},
+     "annotations": READS, "_meta": UI},
     {"name": "find_lead",
      "title": "Find who could lead the round",
      "description": "A founder has investors who said \"we're in once you have a lead\". Walks Cala's funding graph from "
@@ -212,6 +275,11 @@ TOOLS = [
      "description": "For the card: how far the walk it is waiting for has got.",
      "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}},
      "annotations": {"readOnlyHint": True}, "_meta": APP_ONLY},
+    {"name": "find_progress",
+     "title": "How far a search has got",
+     "description": "For the card: how far the investor search it is waiting for has got, and the list when it is done.",
+     "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}},
+     "annotations": {"readOnlyHint": True}, "_meta": APP_ONLY},
     {"name": "tracker_set",
      "title": "Set a lead's status",
      "description": "For the card: set one lead's status in the round tracker.",
@@ -228,6 +296,8 @@ TOOLS = [
 ]
 
 PROGRESS: dict[str, dict] = {}   # walks under way, by what the assistant asked for, so a waiting card can show them
+FINDS: dict[str, dict] = {}      # investor searches under way, the same way
+SEARCHES: dict[str, asyncio.Task] = {}   # one search per question at a time, by its run id
 
 SAID = {"lead": "the page says it led", "report": "known from a report, no round page", "follower": "the page names another lead",
         "unstated": "the page names it but does not say it led", "other": "the page says it led another round of this company",
@@ -342,8 +412,117 @@ class Server:
     def __init__(self, suggest: Callable[[str], Awaitable[dict]], run: Callable[[dict, Callable], Awaitable[dict]],
                  load: Callable[[str], dict | None], check: Callable[[str], Awaitable[dict]] | None = None,
                  company: Callable[[str], Awaitable[dict | None]] | None = None,
-                 holdout: Callable[[str], Awaitable[dict | None]] | None = None):
+                 holdout: Callable[[str], Awaitable[dict | None]] | None = None,
+                 search: Callable[[dict, Callable], Awaitable[dict]] | None = None):
         self.suggest, self.run, self.load, self.check, self.company, self.holdout = suggest, run, load, check, company, holdout
+        self.search = search   # `search(inputs, emit)` finds investors from a field: scout.scout on the server's Cala client
+
+    # ------------------------------------------------------------------------------------- investors from a field
+
+    async def _search(self, inputs: dict, key: str) -> tuple[dict | None, dict]:
+        """The stored search, or a fresh one. A fresh one that takes longer than an assistant should wait goes on in the
+        background: (None, how far it has got) comes back, and the card asks find_progress for the rest."""
+        rid = scout.run_id(inputs)
+        stored = extras.blob_get("scout:" + rid, SEARCH_STORED_S)
+        if stored:
+            return stored, {}
+        for old in [k for k, v in FINDS.items() if time.time() - v["started"] > 1800]:
+            FINDS.pop(old, None)
+        seen = FINDS.get(key) if FINDS.get(key, {}).get("run_id") == rid and FINDS[key]["state"] == "searching" else None
+        if not seen:
+            seen = FINDS[key] = {"state": "searching", "started": time.time(), "run_id": rid, "step": "field", "names": [], "found": 0,
+                                 "companies": None, "rounds": None, "pages": None, "investors": None, "reading": [], "calls": 0}
+
+        async def emit(event: dict) -> None:
+            seen["calls"] = event.get("cala_calls") or seen["calls"]
+            step = event.get("step")
+            if step:
+                seen["step"] = step
+            if step == "companies":
+                seen["names"], seen["found"] = event.get("names") or [], event.get("found") or 0
+            elif step == "rounds":
+                seen["rounds"], seen["companies"] = event.get("rounds"), event.get("companies")
+            elif step == "pages":
+                seen["pages"] = {k: event.get(k) for k in ("pages", "confirmed", "corrected")}
+            elif step == "investors":
+                seen["investors"], seen["reading"] = event.get("investors"), (event.get("reading") or [])[:8]
+
+        async def work() -> dict:
+            try:
+                r = await self.search(inputs, emit)
+                extras.blob_put("scout:" + rid, r)
+                if r["page_check"]["claims"]:
+                    extras.blob_put("check:scout:" + rid, {"page_check": r["page_check"]})
+                seen["state"] = "done"
+                return r
+            except Exception as exc:  # noqa: BLE001
+                seen["state"], seen["error"] = "failed", f"{type(exc).__name__}: {exc}"[:200]
+                raise
+            finally:
+                SEARCHES.pop(rid, None)
+
+        task = SEARCHES.get(rid)
+        if not task:
+            task = SEARCHES[rid] = asyncio.create_task(work())
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), FIRST_ANSWER_S), seen
+        except asyncio.TimeoutError:
+            return None, seen
+
+    async def find_investors(self, args: dict) -> dict:
+        if not self.search:
+            return _error("This server cannot search investors.")
+        sector = _sector(args.get("sector"))
+        like = [str(x).strip()[:60] for x in ([args["like"]] if isinstance(args.get("like"), str) else args.get("like") or [])
+                if str(x).strip()][:6]
+        if len(sector) < 2 and not like:
+            return _error("Say what the founder builds, e.g. {\"sector\": \"artificial intelligence\"}, or name companies like "
+                          "theirs in like.")
+        given = args.get("investors")
+        names = [str(x).strip()[:60] for x in ([given] if isinstance(given, str) else given or []) if str(x).strip()][:6]
+        mine, unknown = await self._resolve(names) if names else ([], [])
+        mine = [{"name": m["name"], "ids": m["ids"]} for m in mine]
+        via = None
+        if str(args.get("company") or "").strip() and self.company:
+            comp = await self.company(str(args["company"]).strip()[:80])
+            if comp and (comp.get("inputs") or {}).get("soft_yeses"):
+                via = comp["name"] if not mine else None
+                have = {i for m in mine for i in m["ids"]}
+                mine += [{"name": s["name"], "ids": s["ids"]} for s in comp["inputs"]["soft_yeses"] if not have & set(s["ids"])]
+            elif not names:
+                unknown.append(str(args["company"]).strip()[:80])
+        inputs = {"sector": sector, "stage": _stage_code(args.get("stage")), "place": str(args.get("place") or "").strip()[:40] or None,
+                  "like": like, "mine": mine[:scout.MINE], "via_company": via}
+        key = _find_key(args)
+        result, seen = await self._search(inputs, key)
+        if result is None:
+            what = " ".join(x for x in (graph.STAGE_NAMES.get(inputs["stage"] or "", ""), sector or "companies like " + ", ".join(like),
+                                        scout.in_words(inputs["place"])) if x)
+            text = (f"Cala is still being read for {what}. The search and the list are drawn in "
+                    "the chat, and the card fills in by itself, usually within a minute or two. Tell the founder that in one "
+                    "sentence and name no investor yet. To read the list yourself, call find_investors again with the same "
+                    "arguments.")
+            return {"content": [{"type": "text", "text": text}], "isError": False,
+                    "structuredContent": {"view": "find", "pending": True, "key": key, "ask": {
+                        "sector": sector or None, "stage": inputs["stage"], "stage_name": graph.STAGE_NAMES.get(inputs["stage"] or ""),
+                        "place": inputs["place"], "like": like, "mine": [m["name"] for m in mine], "via_company": via},
+                        "queries": [q for _, q in scout.queries(sector, inputs["stage"], inputs["place"])] if sector else [],
+                        "progress": _seen(seen)}}
+        text = scout.text(result, PUBLIC_URL)
+        if unknown:
+            text += f"\nNot found in Cala, so left out: {', '.join(unknown)}."
+        return {"content": [{"type": "text", "text": text}], "structuredContent": scout.view(result, PUBLIC_URL), "isError": False}
+
+    async def find_progress(self, args: dict) -> dict:
+        seen = FINDS.get(str(args.get("key") or ""))
+        if not seen:
+            return {"content": [{"type": "text", "text": "No search under way."}], "structuredContent": {"state": "none"}, "isError": False}
+        out = _seen(seen)
+        if seen["state"] == "done":
+            stored = extras.blob_get("scout:" + seen["run_id"])
+            if stored:
+                out["result"] = scout.view(stored, PUBLIC_URL)
+        return {"content": [{"type": "text", "text": f"{seen['calls']} Cala calls so far."}], "structuredContent": out, "isError": False}
 
     async def who_led(self, args: dict) -> dict:
         name = str(args.get("company") or "").strip()
@@ -688,7 +867,8 @@ class Server:
             fn = {"find_lead": self.find_lead, "explore_network": self.explore_network, "draft_intro": self.draft_intro,
                   "round_tracker": self.round_tracker, "check_claim": self.check_claim, "who_led": self.who_led,
                   "check_investor": self.check_investor, "walk_progress": self.walk_progress, "tracker_set": self.tracker_set,
-                  "flag_claim": self.flag_claim}.get(params.get("name"))
+                  "flag_claim": self.flag_claim, "find_investors": self.find_investors,
+                  "find_progress": self.find_progress}.get(params.get("name"))
             if not fn:
                 return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"Unknown tool: {params.get('name')}"}}
             try:
@@ -697,8 +877,8 @@ class Server:
                 return ok(_error(f"Soft Yes could not finish: {type(exc).__name__}: {exc}"[:300]))
         if method == "resources/list":
             return ok({"resources": [{"uri": UI_URI, "name": "soft-yes-card", "title": "Soft Yes",
-                                      "description": "The card Soft Yes draws in the chat: the walk through Cala's graph, the "
-                                                     "network, the draft, the round and the claim check.",
+                                      "description": "The card Soft Yes draws in the chat: the investor search, the walk through "
+                                                     "Cala's graph, the network, the draft, the round and the claim check.",
                                       "mimeType": UI_MIME}]})
         if method == "resources/read":
             if params.get("uri") != UI_URI:
@@ -738,6 +918,10 @@ def _door_text(view: dict, target: str) -> str:
     for m, rounds in sorted(doors.items(), key=lambda kv: -len(kv[1])):
         lines.append(f"- {net['names'][m]}: {len(rounds)} shared round{'s' if len(rounds) != 1 else ''} ({'; '.join(rounds[:3])})")
     return "\n".join(lines)
+
+
+def _seen(seen: dict) -> dict:
+    return {**seen, "seconds": round(time.time() - seen["started"], 1)}
 
 
 def _error(text: str) -> dict:

@@ -260,7 +260,7 @@ body.bare .scroll { overflow: visible; }
     for (const c of cards.values()) post(c, { method: 'ui/notifications/host-context-changed', params: { theme: theme() } })
   })
 
-  const WORD = { find_lead: 'Walking Cala’s graph', explore_network: 'Reading the network from Cala', draft_intro: 'Writing the ask from checked facts', round_tracker: 'Opening the round', check_claim: 'Reading the page Cala cites' }
+  const WORD = { find_investors: 'Reading Cala for investors', find_lead: 'Walking Cala’s graph', explore_network: 'Reading the network from Cala', draft_intro: 'Writing the ask from checked facts', round_tracker: 'Opening the round', check_claim: 'Reading the page Cala cites' }
 
   async function step(tool, args) {
     state.busy = true
@@ -320,6 +320,7 @@ body.bare .scroll { overflow: visible; }
   }
 
   const START = [
+    { label: 'Pre-seed investors for AI in Europe', say: 'We’re building in artificial intelligence in Europe and raising a pre-seed round. Which investors fit, and who could Cala AI’s investors introduce us to?', run: () => step('find_investors', { sector: 'artificial intelligence', stage: 'PRE_SEED', place: 'Europe', company: 'Cala AI' }) },
     { label: 'Who could lead Cala AI’s next round?', say: 'My company is Cala AI. Who could lead our next round?', run: () => step('find_lead', { company: 'Cala AI' }) },
     { label: 'Tesi and Innovestor said yes', say: 'Tesi and Innovestor said they’re in once we have a lead. Who could lead our Series A?', run: () => step('find_lead', { investors: ['Tesi', 'Innovestor'], stage: 'SERIES_A' }) },
     { label: 'Who led Cala AI’s rounds, by the page?', say: 'Who led Cala AI’s rounds? Check it against the page.', run: () => step('check_claim', { company: 'Cala AI' }) },

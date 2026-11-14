@@ -18,7 +18,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from . import cala as cala_mod
-from . import extras, graph, knowledge, mcp as mcp_mod, pagecheck, walk as walk_mod
+from . import extras, graph, knowledge, mcp as mcp_mod, pagecheck, scout as scout_mod, walk as walk_mod
 from .cala import BASE, CREDIT_CAP, BudgetExceeded, CalaError, Ledger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -965,7 +965,8 @@ async def _mcp_holdout(run_id: str) -> dict | None:
 
 
 MCP = mcp_mod.Server(suggest=lambda name: suggest(name), run=lambda inputs, emit: _run(inputs, emit), load=_load_annotated,
-                     check=lambda name: _check(q=name), company=_mcp_company, holdout=_mcp_holdout)
+                     check=lambda name: _check(q=name), company=_mcp_company, holdout=_mcp_holdout,
+                     search=lambda inputs, emit: scout_mod.scout(cala_mod.get(), inputs, emit))
 
 
 @app.post("/mcp")

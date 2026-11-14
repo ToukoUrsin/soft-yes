@@ -35,7 +35,7 @@ function askTitle(d: DraftData) {
 function mine(): Record<string, string> {
   try { return JSON.parse(localStorage.getItem('sy:mine') || '{}') || {} } catch { return {} }
 }
-const HINT: Record<string, string> = { '[your company]': 'Its name', '[what you do]': 'builds … for …, in a few words' }
+const HINT: Record<string, string> = { '[your company]': 'Its name', '[what you do]': 'builds … for …, in a few words', '[your round]': 'a €… Series A' }
 
 export function DraftBody({ data: d, onClose, proofAbove }: { data: DraftData; onClose?: () => void; proofAbove?: boolean }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')

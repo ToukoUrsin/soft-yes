@@ -31,6 +31,7 @@ export interface Lead {
   rounds: number
   last_led?: Brief | null
   fit?: boolean | null
+  fit_line?: string | null
   at_slush: boolean
 }
 
@@ -133,7 +134,86 @@ export interface ClaimData {
   said_on_pages: { quote?: string; url?: string; publisher?: string }[]
 }
 
-export type Data = WalkData | NetworkData | DraftData | TrackerData | ClaimData
+export interface Cite { publisher?: string | null; url?: string | null; date?: string | null }
+export interface Signal { id: string; label: string; on: boolean; text: string; n?: number; via?: string[] }
+export interface FindDeal { company?: string; stage_name?: string; date?: string | null; led: boolean; status?: string | null; quote?: string | null; url?: string | null; publisher?: string | null; led_by?: string[] | null; sources: Cite[]; money?: string | null }
+export interface FindInvestor {
+  key: string
+  name: string
+  kind: string
+  rank: number
+  line: string
+  signals: Signal[]
+  on: number
+  led_here: number
+  companies: number
+  named_by_cala: boolean
+  proof?: { company?: string; stage_name?: string; date?: string | null; quote?: string; url?: string; publisher?: string } | null
+  deals: FindDeal[]
+  backed: { company: string; sources: Cite[] }[]
+  hq?: string | null
+  website?: string | null
+  description?: string | null
+  own?: { rounds: number; led: number; at_stage: number; led_at_stage: number; capped: boolean; portfolio: number; recent: number } | null
+  path: { via: string; rounds: number; company?: string | null; stage_name?: string | null; date?: string | null }[]
+}
+export interface FindCompany {
+  id: string
+  name: string
+  from: 'you' | 'cala'
+  description?: string | null
+  where?: string | null
+  stage?: string | null
+  founded?: string | null
+  industries: string[]
+  investors_listed: number
+  rounds: { id: string; stage_name?: string; date?: string | null; money?: string | null; leads: { key: string; name: string; status?: string | null }[]; investors: string[]; sources: Cite[] }[]
+}
+export interface FindAsk { sector?: string | null; stage?: string | null; stage_name?: string | null; place?: string | null; like: string[]; mine: string[]; via_company?: string | null }
+export interface FindProgress {
+  state: string
+  step?: string
+  names?: string[]
+  found?: number
+  companies?: number | null
+  rounds?: number | null
+  pages?: { pages?: number; confirmed?: number; corrected?: number } | null
+  investors?: number | null
+  reading?: string[]
+  calls?: number
+  seconds?: number
+  error?: string
+  result?: FindData
+}
+export interface FindData {
+  view: 'find'
+  pending?: boolean
+  key?: string
+  url?: string
+  run_id?: string
+  ask: FindAsk
+  queries: string[]
+  headline?: string
+  companies: FindCompany[]
+  investors: FindInvestor[]
+  investors_total: number
+  counts: { companies: number; named_by_cala: number; rounds: number; rounds_read: number; investors: number; leads: number; own_records: number }
+  check: { rounds: number; pages: number; confirmed: number; corrected: number; unstated: number; unread: number }
+  fixes: Fix[]
+  ledger: { cala_calls?: number; fresh?: number; cached?: number; facts?: number; llm: number }
+  progress?: FindProgress
+}
+
+export type Data = WalkData | NetworkData | DraftData | TrackerData | ClaimData | FindData
+
+/** The search as the founder asked it: "pre-seed artificial intelligence in Europe". */
+export function askWords(a?: Partial<FindAsk> | null): string {
+  if (!a) return ''
+  const stage = a.stage_name ? (/^series/i.test(a.stage_name) ? a.stage_name : a.stage_name.toLowerCase()) : ''
+  const what = a.sector || (a.like?.length ? `companies like ${listAnd(a.like.slice(0, 3))}` : '')
+  const the = a.place && /^(nordics|baltics|uk|us|usa|netherlands)$/i.test(a.place) ? 'the ' : ''
+  return [stage, what, a.place ? `in ${the}${a.place}` : ''].filter(Boolean).join(' ')
+}
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
