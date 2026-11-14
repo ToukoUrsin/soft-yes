@@ -36,8 +36,8 @@ Slush is next week, and 7 of these leads are on the attendee list. So next time 
 - **Two of three were wrong. Why is Lifeline still first?** It leads a lot, and the Verda round holds on the page. We picked this example because it shows the check. Overall it's 18 in 700.
 - **Are all 8 confirmed on the page?** The 8 is Cala's count. We open the page for every round it shares with your investors, because that's what goes in the intro.
 - **Who reads the page?** Code, no model. It looks for the investor's name next to "led by" in the page's own sentence and shows you that sentence. We went through the 18 by hand.
-- **What if Cala knows few rounds for my investor?** It says so and gives a short list with no first pick. Add a second investor: that's the 11 of 41.
-- **And from one investor?** No better than chance in our test. That's why the form asks for two.
+- **What if Cala knows few rounds for my investor?** It says so and gives a short list with no first pick. Add a second investor: that's the 13 of 57.
+- **And from one investor?** Too close to chance in our test (8 of 144). That's why the form asks for two.
 - **What is "at random"?** An investor who led some round that same year.
 - **Where is the Slush list from?** Slush's own attendee list, the one every ticket holder sees.
 - **Who uses it tomorrow?** A founder with one soft yes and Slush next week. Their assistant can call it too, it's an MCP server.

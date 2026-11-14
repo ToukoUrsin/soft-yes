@@ -30,7 +30,7 @@ BLOB = "backtest:v1"
 MIN_HISTORY = 3      # a follower needs this many earlier rounds; below it the round is counted as "too little history"
 SEED = 20261114      # fixed, so the same cache gives the same numbers
 DRAWS = 500          # random investors drawn per tested round for the base rate
-RULES = ("count_then_recent", "recent", "decayed")
+RULES = ("count_then_recent", "recent", "decayed", "decayed_stage")
 PRIMARY = "count_then_recent"
 
 # Why a round Cala holds was not tested. The keys are shown as they are.
@@ -182,10 +182,12 @@ class _Graph:
                     self.followed[firm].setdefault(E["id"], []).extend(r["sources"])
         # Who led what, for the base rates.
         self.led: list[tuple[str, str, str]] = []   # (deal's last date, deal's year, firm)
+        self.led_at: dict[str, list[tuple]] = collections.defaultdict(list)   # firm -> (deal's last date, stage) of each round it led
         for rd in deals.values():
             if rd["first"]:
                 for k in sorted({self.firm(i) for i in rd["investors"] if i["led"] and self.real(i)}):
                     self.led.append((rd["last"], rd["first"][:4], k))
+                    self.led_at[k].append((rd["last"], rd.get("stage")))
         self._history: dict[tuple, tuple] = {}
 
     def firm(self, i: dict) -> str | None:
@@ -255,16 +257,25 @@ def _same_company(a: dict, b: dict) -> bool:
     return bool(ia.get("name") and ib.get("name")) and walk._same_company(graph.norm(ia["name"]), graph.norm(ib["name"]))
 
 
-def _ranks(entries: dict, R: dict) -> dict[str, dict[str, int]]:
+def _ranks(entries: dict, R: dict, led_at: dict | None = None) -> dict[str, dict[str, int]]:
     """Each rule's place for every investor on the list, using only what was dated before R. Ties take the worst
     place of the tie, so a place is never better than the rule can tell."""
     keys = {}
+    stage = R.get("stage") if R.get("stage") in graph.STAGE_ORDER else None
     for k, e in entries.items():
         ds = list(e["deals"].values())
         last = max(d["last"] for d in ds)
         # the product's recency weight (half as much every three years), counted back from R instead of from today
         decayed = sum(0.5 ** (max(_years(d["last"], R["first"]), 0) / 3) for d in ds) * (1 + 0.35 * (len(e["softs"]) - 1))
-        keys[k] = {"count_then_recent": (len(ds), last), "recent": (last,), "decayed": (round(decayed, 9),)}
+        # the product's stage count: the rounds this lead led before R, anywhere in the cache, at the tested round's
+        # stage. More for each such round up to five; less for a lead with three led rounds and none at that stage.
+        staged = decayed
+        if stage:
+            before = [st for when, st in (led_at or {}).get(k, []) if when < R["first"]]
+            n = sum(1 for st in before if st == stage)
+            staged *= (1 + 0.1 * min(n, 5)) if n else 0.6 if len(before) >= 3 else 0.8
+        keys[k] = {"count_then_recent": (len(ds), last), "recent": (last,), "decayed": (round(decayed, 9),),
+                   "decayed_stage": (round(staged, 9),)}
     return {rule: {k: sum(1 for o in keys.values() if o[rule] >= keys[k][rule]) for k in keys} for rule in RULES}
 
 
@@ -321,7 +332,7 @@ def _tests(g: _Graph, strict: bool = True, other_companies: bool = False) -> dic
 
 def _one(g: _Graph, R: dict, softs: list[str], followers: dict, truth: dict, strict: bool, other_companies: bool) -> dict:
     entries, hidden = g.shortlist(softs, R, strict, other_companies)
-    ranks = _ranks(entries, R)
+    ranks = _ranks(entries, R, g.led_at)
     found = [k for k in truth if k in entries]
     best = min(found, key=lambda k: ranks[PRIMARY][k]) if found else None
     on_page = {k for k, i in truth.items() if g.claims.get((R["id"], graph.norm(i["name"]))) == "lead"}
@@ -552,7 +563,7 @@ async def compute(cala: cala_mod.Cala | None = None) -> dict:
                 f"An investor drawn at random from the {base['investors_to_draw_from']:.0f} or so that led a round we hold from "
                 f"the same year is on it {100 * base_rate:.0f}% of the time and in its top 5 {100 * base_top5:.0f}% of the time. "
                 + ("Random draws do as well over the whole test in "
-                   f"{100 * base['chance_random_does_as_well']:.0f}% of trials, so the difference "
+                   f"{100 * base['chance_random_does_as_well']:.1f}% of trials, so the difference "
                    + ("is unlikely to be chance. " if base["chance_random_does_as_well"] < 0.01 else
                       "is borderline and may be chance. " if base["chance_random_does_as_well"] < 0.10 else "could well be chance. "))
                 + f"The cache holds at most the {walk.FOLLOW_CAP} most recent rounds of a follower, so the walk had less "
@@ -574,6 +585,8 @@ async def compute(cala: cala_mod.Cala | None = None) -> dict:
                       "count_then_recent": "rounds led next to the followers before the tested round, then the most recent of them",
                       "recent": "the most recent such round only",
                       "decayed": "the product's recency weight counted back from the tested round, more for a lead met by both followers",
+                      "decayed_stage": "the same weight times the product's stage count: more for each round the lead led before "
+                                       "the tested round at that round's stage, less for a lead with a record and no such round",
                       "results": {rule: _tally(tests, rule) for rule in RULES},
                       "ties": "a tie takes the worst place in the tie"},
             "base": base | {"top5_rate": round(base_top5, 4),

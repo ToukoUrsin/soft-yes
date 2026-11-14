@@ -96,6 +96,55 @@ def family(name: str) -> str | None:
     return base
 
 
+# Words a firm's name can end with and still be that firm: 'Acton Capital' and 'Acton Capital Partners'.
+PLAIN_TAIL = {"ventures", "venture", "capital", "partners", "vc", "investments", "investment", "invest", "management",
+              "company", "factory", "managers", "manager", "group", "holding", "holdings", "fund", "funds"}
+# Legal forms of a fund vehicle: 'Seaya Ventures, FCR, en liquidacion', 'Adara Ventures SICAR, S.C.A.'
+VEHICLE = {"fcr", "scr", "fcre", "sicar", "sca", "gp", "en", "liquidacion"}
+
+
+def firm_words(name: str) -> list[str]:
+    """A name's words without the tail that names a vehicle and not a firm: 'Seaya Ventures II, FCR' -> seaya, ventures.
+    A fund number is only dropped after a fund word, and 'Fund' only after one too ('World Fund' stays as it is)."""
+    name = re.sub(r"\b(?:[A-Za-z]\.){2,}", lambda m: m.group(0).replace(".", ""), name or "")   # 'S.C.A.' is one word
+    w = re.findall(r"[a-z0-9åäöüéèñøæ]+", name.lower())
+    while len(w) > 1:
+        last, prev = w[-1], w[-2]
+        if last in LEGAL or last in VEHICLE:
+            w.pop()
+        elif re.fullmatch(r"[ivx]+|\d{1,2}", last) and prev in PLAIN_TAIL:
+            w.pop()
+        elif last in ("fund", "funds") and prev in PLAIN_TAIL and prev not in ("fund", "funds"):
+            w.pop()
+        else:
+            break
+    return w
+
+
+def firm_key(name: str) -> str:
+    """`norm` with the vehicle tail gone: 'Maki.vc FUND I' and 'Maki VC' are one firm by name alone."""
+    key = "".join("fund" if x == "fonds" else x for x in firm_words(name))
+    return SHORT_FOR.get(key, key)
+
+
+def longer_name(a: str, b: str) -> bool:
+    """One name is the other with plain fund words added: 'Decibel' and 'Decibel Partners', 'Inveready' and
+    'Inveready Capital Company'. That is not proof on its own ('Amadeus' is not 'Amadeus Capital Partners'): the
+    caller merges such a pair only when Cala's own data ties the two together."""
+    wa, wb = firm_words(a), firm_words(b)
+    if len(wa) > len(wb):
+        wa, wb = wb, wa
+    if len(wa) == len(wb) or wb[:len(wa)] != wa or not all(x in PLAIN_TAIL for x in wb[len(wa):]):
+        return False
+    base = []
+    for x in wa:
+        if x in PLAIN_TAIL:
+            break
+        base.append(x)
+    stem = "".join(base)
+    return len(stem) >= 4 and stem not in GENERIC_BASE
+
+
 CASING = {"capitalg": "CapitalG", "byfounders": "byFounders", "softbank": "SoftBank", "openai": "OpenAI", "nordicninja": "NordicNinja",
           "icebreaker.vc": "Icebreaker.vc", "maki.vc": "Maki.vc", "b2venture": "b2venture",
           "seedcamp": "Seedcamp", "paypal": "PayPal", "linkedin": "LinkedIn", "github": "GitHub", "nvidia": "Nvidia",

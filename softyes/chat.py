@@ -79,6 +79,10 @@ def _lead(e: dict, labels: dict) -> dict:
             "doors": [{"key": a["key"], "name": a["name"], "deals": a["deals"]} for a in e.get("asks") or []][:4],
             "evidence": [_evidence(d, e["name"]) for d in e["evidence"][:3]], "rounds": len(e["evidence"]),
             "last_led": _brief(e.get("last_led")), "fit": (e.get("fit") or {}).get("match"),
+            # the asked stage in this lead's own record, as one line: "Led 4 Series A rounds in Cala, $8M to $30M"
+            "fit_line": (e.get("fit") or {}).get("line"), "led_at_stage": (e.get("fit") or {}).get("led_at_stage"),
+            # other spellings Cala holds this firm under, counted here as the one lead
+            "also_named": [a["name"] for a in e.get("also_named") or []],
             "at_slush": bool(e.get("at_slush"))}
 
 

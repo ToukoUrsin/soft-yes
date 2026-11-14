@@ -100,7 +100,9 @@ const KINDS: { id: DraftKind; name: string }[] = [
   { id: 'slush', name: 'Slush note' },
 ]
 
-const drafts = new Map<string, { draft: Draft; final: boolean }>()
+// One message per run, lead and kind: the server keeps its wording, and every pane that shows it shares one request.
+const drafts = new Map<string, Draft>()
+const asking = new Map<string, Promise<Draft>>()
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, set] = useState(value)
@@ -162,7 +164,7 @@ export function DraftPane({
   const settled = useDebounced(founder, 700)
   const key = `${result.run_id}:${lead.key}:${kind}:${settled.company}|${settled.one_liner}|${settled.raising}`
   const [state, setState] = useState<{ draft: Draft | null; phrasing: boolean; error: string | null }>({
-    draft: drafts.get(key)?.draft ?? null, phrasing: false, error: null,
+    draft: drafts.get(key) ?? null, phrasing: false, error: null,
   })
   const [attempt, retry] = useReducer((n: number) => n + 1, 0)
   const gemini = config?.gemini
@@ -171,35 +173,25 @@ export function DraftPane({
   useEffect(() => {
     if (gemini == null || wait) return
     const hit = drafts.get(key)
-    if (hit?.final) {
-      setState({ draft: hit.draft, phrasing: false, error: null })
+    if (hit) {
+      setState({ draft: hit, phrasing: false, error: null })
       return
     }
-    const ctl = new AbortController()
     let live = true
     // Never the last draft under new inputs: a reader takes whatever text is on the page as the answer.
-    setState({ draft: hit?.draft ?? null, phrasing: false, error: null })
-    const body = { run_id: result.run_id, lead_key: lead.key, kind, founder: settled }
-    ;(async () => {
-      try {
-        const template = hit?.draft ?? (await api.draft({ ...body, llm: false }, ctl.signal))
-        if (!live) return
-        drafts.set(key, { draft: template, final: !gemini })
-        setState({ draft: template, phrasing: gemini, error: null })
-        if (!gemini) return
-        const phrased = await api.draft({ ...body, llm: true }, ctl.signal)
-        if (!live) return
-        drafts.set(key, { draft: phrased, final: true })
-        setState({ draft: phrased, phrasing: false, error: null })
-      } catch (e) {
-        if (!live || (e as Error).name === 'AbortError') return
-        // If only the phrasing failed, the template stays: it is already a complete, checked draft.
-        setState((s) => ({ draft: s.draft, phrasing: false, error: s.draft ? null : (e as Error).message }))
-      }
-    })()
+    setState({ draft: null, phrasing: false, error: null })
+    let job = asking.get(key)
+    if (!job) {
+      job = api.draft({ run_id: result.run_id, lead_key: lead.key, kind, founder: settled })
+      asking.set(key, job)
+      job.then((d) => drafts.set(key, d), () => undefined).finally(() => asking.delete(key))
+    }
+    job.then(
+      (d) => live && setState({ draft: d, phrasing: false, error: null }),
+      (e) => live && setState({ draft: null, phrasing: false, error: (e as Error).message }),
+    )
     return () => {
       live = false
-      ctl.abort()
     }
     // founder fields are part of `key`
     // eslint-disable-next-line react-hooks/exhaustive-deps

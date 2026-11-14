@@ -132,7 +132,14 @@ export interface Lead {
   pulse: Pulse | null
   recent_leads: RoundWithSources[]
   last_led: RoundWithSources | null
-  fit: { stage: string; stage_name: string; led_at_stage: number; match: boolean } | null
+  /** The asked stage in this lead's own record. `line` says it with numbers; `sizes` is the range of those rounds in Cala. */
+  fit: {
+    stage: string; stage_name: string; led_at_stage: number; match: boolean; line?: string
+    sizes?: { min: number; max: number; min_currency: string; max_currency: string; n: number } | null
+    size_gap?: { way: 'larger' | 'smaller'; text: string }
+  } | null
+  /** Other spellings Cala holds this firm under, counted here as one lead, each with why it is the same firm. */
+  also_named?: { name: string; why: string }[]
   typical_round: { min: number; max: number; n: number } | null
   portfolio: { id: string; name: string; sources: Source[] }[]
   at_slush?: AtSlush | null
@@ -550,7 +557,7 @@ export const api = {
   investor: (ids: string[], name: string | null, signal?: AbortSignal) =>
     request<Result>(`/api/investor?${qs({ ids: ids.join(','), name })}`, { signal }),
   draft: (
-    body: { run_id: string; lead_key: string; kind: DraftKind; founder: Founder; llm: boolean },
+    body: { run_id: string; lead_key: string; kind: DraftKind; founder: Founder },
     signal?: AbortSignal,
   ) =>
     request<Draft>('/api/draft', {

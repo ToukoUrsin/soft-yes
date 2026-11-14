@@ -199,7 +199,7 @@ function Tested() {
         </dl>
         <p className="bt__read">
           {lift ? <>From two followers the real lead is on the list <b className="num">{lift} times</b> as often as chance. </> : null}
-          From one it is no better than chance, so give it two. The order inside the list is not a forecast: the real lead was
+          From one it is too close to chance to count, so give it two. The order inside the list is not a forecast: the real lead was
           in the top five in {b.top5} of {b.tested}. Read the list as people your investors can open a door to.
         </p>
         {b.examples.length > 0 && (

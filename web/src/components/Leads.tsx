@@ -33,8 +33,10 @@ export function WhyList({ why }: { why: Why[] }) {
 
 /** A row carries the two reasons that rank it, plus anything that counts against it. The detail lists them all. */
 function rowWhy(lead: Lead): Lead['why'] {
-  const head = lead.why.slice(0, 2)
-  return [...head, ...lead.why.slice(2).filter((w) => w.tone === 'warn')].slice(0, 3)
+  // When a stage was asked, the line on that stage is one of the two: it moves the lead up or down the list.
+  const fit = lead.fit?.line ? lead.why.find((w) => w.text === lead.fit?.line) : undefined
+  const head = fit ? [lead.why[0], fit] : lead.why.slice(0, 2)
+  return [...head, ...lead.why.slice(1).filter((w) => w.tone === 'warn' && !head.includes(w))].slice(0, 3)
 }
 
 // What the first five leads say on their own sites. A stored run carries it; a walk that just ended asks once.
@@ -506,6 +508,7 @@ export function LeadDetail({
               ? `Led ${plural(lead.evidence.length, 'round')} in companies ${listAnd(softNames)} ${softNames.length === 1 ? 'backs' : 'back'}`
               : `Led ${plural(lead.evidence.length, 'round')} that ${listAnd(softNames)} joined${lead.evidence.some((e) => e.relation === 'cap_table') ? ', or in companies they back' : ''}`}
           {lead.kind === 'person' ? ' · a person, not a fund' : ''}
+          {lead.also_named?.length ? ` · Cala also lists it as ${listAnd(lead.also_named.map((a) => a.name))}` : ''}
           <span className="detail__check2">
             <span className="sep"> · </span>
             <Link className="link" href={investorHref(lead.ids, lead.name)}>Lead or follow?</Link>

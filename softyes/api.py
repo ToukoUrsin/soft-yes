@@ -547,7 +547,18 @@ async def _company(ids: list[str], cache_only: bool = False) -> dict | None:
             seen[inv["key"]]["ids"] = list(dict.fromkeys(seen[inv["key"]]["ids"] + inv["ids"]))[:6]
         else:
             seen[inv["key"]] = inv
-    d["investors"] = list(seen.values())
+    # One firm under two spellings on one cap table ('Inveready', 'Inveready Capital Company') is one investor:
+    # the same name without the vehicle's legal tail, or one name is the other plus plain fund words.
+    kept: list[dict] = []
+    for inv in sorted(seen.values(), key=lambda v: (-v["rounds"], len(v["name"]))):
+        twin = next((k for k in kept if k.get("kind") != "person" and inv.get("kind") != "person" and
+                     (graph.firm_key(k["name"]) == graph.firm_key(inv["name"]) or graph.longer_name(k["name"], inv["name"]))), None)
+        if twin:
+            twin["ids"] = list(dict.fromkeys(twin["ids"] + inv["ids"]))[:6]
+            twin.setdefault("also_named", []).append(inv["name"])
+        else:
+            kept.append(inv)
+    d["investors"] = [v for v in seen.values() if any(v is k for k in kept)]
     if d["investors"] or d["rounds"]:
         co = ISSUERS.setdefault(d["id"], {"id": d["id"], "name": d["name"], "rounds": set(), "description": d.get("description")})
         co["rounds"].update(r["id"] for r in d["rounds"])

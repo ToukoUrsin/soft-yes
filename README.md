@@ -35,10 +35,11 @@ All of it is public at [/audit](https://soft-yes.fly.dev/audit): the totals over
 
 ## Does it find the real lead?
 
-We tested the walk on rounds that already happened. Each of 167 past rounds was hidden together with everything dated after it, and the walk was run from the investors who followed.
+We tested the walk on rounds that already happened. Each of 201 past rounds was hidden together with everything dated after it, and the walk was run from the investors who followed.
 
-- From two followers the real lead was on the list in 11 of 41 rounds (27%). A lead picked at random from the same year is there 11% of the time.
-- From one follower it was 5 of 126, no better than chance.
+- From two followers the real lead was on the list in 13 of 57 rounds (23%). A lead picked at random from the same year is there 10% of the time.
+- From one follower it was 8 of 144 (6%), against 4% at random: too close to chance to count.
+- Over all 201 rounds the real lead was in the top five in 10. Counting how many rounds a lead has led at the round's stage, as the ranking now does, leaves the top five where it was (11 before, 11 after, by the product's own weight) and moves two more leads into the top ten (13 to 15).
 
 So give it two, and read the list as doors your investors can open, not as a forecast. The numbers, three hits and a miss are at the bottom of [/audit](https://soft-yes.fly.dev/audit#backtest). `uv run python -m softyes.backtest --dry` recomputes them from the cache with no Cala call.
 

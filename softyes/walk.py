@@ -452,15 +452,17 @@ def _pulse(inv: dict, dates: dict[str, str] | None = None, led_too: dict[str, di
     """
     dates, led_too, canon, not_led, labels = dates or {}, led_too or {}, canon or {}, not_led or set(), labels or {}
     checks = checks or {}
-    rounds, seen = [], set()
+    rounds, seen = [], {}
     for r in inv["rounds"]:
         rid = canon.get(r["id"], r["id"])
-        if rid in seen:
-            continue
-        seen.add(rid)
         label = labels.get(rid) or graph.STAGE_NAMES.get((r["label"] or "").upper().replace("-", "_").replace(" ", "_"), r["label"])
-        rounds.append({"id": rid, "label": label, "is_lead": (r["is_lead"] and rid not in not_led) or rid in led_too,
-                       "when": dates.get(rid) or dates.get(r["id"]) or r["reported"]})
+        led = (r["is_lead"] and rid not in not_led) or rid in led_too
+        if rid in seen:   # one deal under two round records: one round, led if either record says so
+            seen[rid]["is_lead"] = seen[rid]["is_lead"] or led
+            seen[rid]["label"] = seen[rid]["label"] or label
+            continue
+        seen[rid] = {"id": rid, "label": label, "is_lead": led, "when": dates.get(rid) or dates.get(r["id"]) or r["reported"]}
+        rounds.append(seen[rid])
     for rid, x in led_too.items():
         if rid not in seen:
             rounds.append({"id": rid, "label": x.get("label"), "is_lead": True, "when": x.get("when")})
@@ -494,6 +496,7 @@ def _pulse(inv: dict, dates: dict[str, str] | None = None, led_too: dict[str, di
             "last_led": {"id": latest["id"], "when": latest["when"], "opened": latest["id"] in dates,
                          "check": checks.get(latest["id"])} if latest else None,
             "led_stages": [{"stage": s, "n": n} for s, n in stages.most_common(5)],
+            "led_list": [[r["id"], r["label"]] for r in led],   # taken out again before the result is stored
             "capped": inv["capped"], "portfolio_size": len(inv["portfolio"])}
 
 
@@ -601,11 +604,10 @@ def same_company(issuer: dict | None, mine: dict) -> bool:
 def _same_deal(a: dict, b: dict) -> bool:
     """Cala sometimes holds one deal as two round entities (one per report). Same company, and the same
     day, or the same stage in the same month, or the same amount within three months."""
-    if not a.get("issuer") or not b.get("issuer"):
-        return False
-    ia, ib = a["issuer"], b["issuer"]
-    if not ((ia.get("id") and ia.get("id") == ib.get("id")) or _same_company(graph.norm(ia["name"]), graph.norm(ib["name"]))):
-        return False
+    ia, ib = a.get("issuer"), b.get("issuer")
+    if not ia or not ib or not ((ia.get("id") and ia.get("id") == ib.get("id")) or
+                                _same_company(graph.norm(ia["name"]), graph.norm(ib["name"]))):
+        return _same_backers(a, b)
     da, db = a.get("date") or "", b.get("date") or ""
     if da and da[:10] == db[:10]:
         return True
@@ -616,6 +618,24 @@ def _same_deal(a: dict, b: dict) -> bool:
         # one sum, one currency: the same deal, unless the two are dated far apart
         return a.get("stage") == b.get("stage") or not da or not db or _days_apart(da, db) <= 90
     return False
+
+
+def _same_backers(a: dict, b: dict) -> bool:
+    """One deal that Cala holds under two company records ('GC AI' and 'General Counsel AI'), or once without its
+    company. Only on the round's own date, the same day; never two different amounts; and nearly the same investors:
+    half of the shorter list when both carry the same amount, four in five (and three names) when one carries none."""
+    da, db = a.get("date") or "", b.get("date") or ""
+    if not da or da[:10] != db[:10] or a.get("date_is_report") or b.get("date_is_report"):
+        return False
+    xa, xb = a.get("amount"), b.get("amount")
+    if xa and xb and (xa != xb or a.get("currency") != b.get("currency")):
+        return False
+    ka = {graph.norm(i["name"]) for i in a.get("investors") or [] if not _no_name(i["name"])}
+    kb = {graph.norm(i["name"]) for i in b.get("investors") or [] if not _no_name(i["name"])}
+    shared, small = len(ka & kb), min(len(ka), len(kb))
+    if xa and xb:
+        return shared >= 2 and shared >= 0.5 * small
+    return shared >= 3 and shared >= 0.8 * small
 
 
 def _merge_deals(rounds: dict[str, dict], joined: dict, backed: dict) -> collections.Counter:
@@ -641,7 +661,7 @@ def _merge_deals(rounds: dict[str, dict], joined: dict, backed: dict) -> collect
             else:
                 base["investors"].append(i)
         base["sources"] = (base["sources"] + [x for x in rd["sources"] if x["url"] not in {y["url"] for y in base["sources"]}])[:6]
-        for k in ("stage", "amount", "currency", "date"):
+        for k in ("stage", "amount", "currency", "date", "issuer"):
             base[k] = base.get(k) or rd.get(k)
         if base["stage"]:
             base["stage_name"] = graph.STAGE_NAMES.get(base["stage"], base["stage_name"])
@@ -654,6 +674,175 @@ def _merge_deals(rounds: dict[str, dict], joined: dict, backed: dict) -> collect
     for rid in [r for r in rounds if r not in kept]:
         del rounds[rid]
     return folded
+
+
+WHY_SAME = {"name": "the same name, apart from the fund's legal tail",
+            "round": "Cala lists both in one round",
+            "company": "Cala lists both in rounds of one company",
+            "record": "Cala's search for the name returns the same record"}
+
+
+def _is_firm(i: dict) -> bool:
+    return i.get("kind") != "person" and bool(graph.norm(i["name"])) and not _no_name(i["name"])
+
+
+def _same_firm(a: str, b: str) -> bool:
+    return graph.firm_key(a) == graph.firm_key(b) or graph.longer_name(a, b)
+
+
+def _groups(pairs: list[tuple[str, str, str]], names: dict[str, str], softs: set[str], seen: collections.Counter) -> dict[str, dict]:
+    """Keys tied together two by two -> for every key that is not its group's own: {key, name, why}. The group goes
+    by the soft yes when one is in it, else by its shortest spelling. Two soft yeses are never made one."""
+    parent: dict[str, str] = {}
+    because: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b, why in pairs:
+        ra, rb = find(a), find(b)
+        if ra != rb and not ({k for k in parent if find(k) == ra} & softs and {k for k in parent if find(k) == rb} & softs):
+            parent[max(ra, rb)] = min(ra, rb)
+            because.setdefault(a, why), because.setdefault(b, why)
+    members: dict[str, list[str]] = collections.defaultdict(list)
+    for k in parent:
+        members[find(k)].append(k)
+    out = {}
+    for group in members.values():
+        if len(group) < 2:
+            continue
+        own = next((k for k in sorted(group) if k in softs), None) or \
+            min(group, key=lambda k: (names[k].isupper(), len(names[k]), -seen[k], k))
+        for k in group:
+            if k != own:
+                out[k] = {"key": own, "name": names[own], "why": because.get(k) or because.get(own) or "name"}
+    return out
+
+
+def _firm_alias(rds: list[dict], softs: list[dict]) -> tuple[dict[str, dict], dict[str, str]]:
+    """Spellings of one firm among the investors of these rounds. Merged only when it is clearly one firm: the same
+    name once the vehicle's legal tail is off ('Seaya Ventures' and 'Seaya Ventures II, FCR'), or one name is the
+    other plus plain fund words ('Decibel', 'Decibel Partners') and Cala lists both in one round or in rounds of
+    one company. Returns key -> {key, name, why} for each spelling that goes by another, and every key's name."""
+    names = {s["key"]: s["name"] for s in softs}
+    seen: collections.Counter = collections.Counter()
+    in_round: list[set[str]] = []
+    in_co: dict[str, set[str]] = collections.defaultdict(set)
+    for rd in rds:
+        keys = set()
+        for i in rd["investors"]:
+            if not _is_firm(i):
+                continue
+            k = graph.norm(i["name"])
+            keys.add(k)
+            seen[k] += 1
+            if k not in names or (names[k].isupper() and not i["name"].isupper()):
+                names[k] = i["name"]
+        in_round.append(keys)
+        issuer = rd.get("issuer") or {}
+        co = issuer.get("id") or graph.norm(issuer.get("name") or "")
+        if co:
+            in_co[co] |= keys
+    pairs = []
+    by_firm: dict[str, list[str]] = collections.defaultdict(list)
+    for k in sorted(names):
+        by_firm[graph.firm_key(names[k])].append(k)
+    for ks in by_firm.values():
+        pairs += [(ks[0], k, "name") for k in ks[1:]]
+    for why, sets in (("round", in_round), ("company", list(in_co.values()))):
+        for keys in sets:
+            ks = sorted(keys)
+            pairs += [(a, b, why) for n, a in enumerate(ks) for b in ks[n + 1:] if graph.longer_name(names[a], names[b])]
+    return _groups(pairs, names, {s["key"] for s in softs}, seen), names
+
+
+def _rename_firms(rds: list[dict], alias: dict[str, dict], tally: collections.Counter, findings: list[dict],
+                  claims: list[list]) -> None:
+    """Write each merged spelling as its firm's one name, in every round. Two rows of one firm in one round become
+    one row: a lead if either was. A 'correction' from one spelling to the other was no correction and is taken back."""
+    if not alias:
+        return
+    touched = set(alias) | {a["key"] for a in alias.values()}
+    for rd in rds:
+        rows, at = [], {}
+        for i in rd["investors"]:
+            k = graph.norm(i["name"])
+            a = alias.get(k) if _is_firm(i) else None
+            if a:
+                i["was"], i["name"], k = i["name"], a["name"], a["key"]
+            have = at.get(k) if k in touched and _is_firm(i) else None
+            if have is None:
+                if k in touched and _is_firm(i):
+                    at[k] = i
+                rows.append(i)
+                continue
+            good = [x for x in (have, i) if x["is_lead"]]
+            lead = next((x for x in good if (x.get("check") or {}).get("status") in CONFIRMED), good[0] if good else None)
+            for x in (have, i):
+                if lead and x is not lead and (x.get("check") or {}).get("status") == "follower":
+                    old = graph.norm(x.get("was") or x["name"])
+                    rd["corrected"] = [c for c in rd.get("corrected", []) if c != old]
+                    rd["corrected_ids"] = [c for c in rd.get("corrected_ids", []) if c != x["id"]]
+                    findings[:] = [f for f in findings if not (f["round"] == rd["id"] and f["kind"] == "lead"
+                                                               and f["cala"] == (x.get("was") or x["name"]))]
+                    claims[:] = [c for c in claims if c != [rd["id"], old, "follower"]]
+                    tally["corrected"] -= 1
+            keep = lead or min((have, i), key=lambda x: STRONGER.index((x.get("check") or {}).get("status"))
+                               if (x.get("check") or {}).get("status") in STRONGER else 99)
+            for f in ("check", "promoted", "lead_reported"):
+                if keep.get(f) is not None:
+                    have[f] = keep[f]
+                else:
+                    have.pop(f, None)
+            have["is_lead"] = bool(lead)
+            have["sources"] = (have["sources"] + [x for x in i["sources"] if x["url"] not in {y["url"] for y in have["sources"]}])[:6]
+            have["more_ids"] = [u for u in dict.fromkeys(have.get("more_ids", []) + [i["id"]] + i.get("more_ids", []))
+                                if u and u != have["id"]]
+            have["id"] = have["id"] or (have["more_ids"].pop(0) if have["more_ids"] else None)
+        rd["investors"] = rows
+        if rd.get("corrected"):
+            rd["corrected"] = [alias[c]["key"] if c in alias else c for c in rd["corrected"]]
+
+
+def _twins(held: dict[str, dict]) -> dict[str, str]:
+    """Among one investor's rounds: the ids that are a deal Cala holds twice -> the id that is kept."""
+    kept, out = [], {}
+    for rid in sorted(held, key=lambda r: (-len(held[r]["investors"]), r)):
+        twin = next((k for k in kept if _same_deal(held[k], held[rid])), None)
+        if twin:
+            out[rid] = twin
+        else:
+            kept.append(rid)
+    return out
+
+
+def _money(amount: float, currency: str | None) -> str:
+    sign = {"USD": "$", "EUR": "\u20ac"}.get(currency or "", "")
+    for cut, unit in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if amount >= cut:
+            n = amount / cut
+            return f"{sign}{n:.1f}".rstrip("0").rstrip(".") + unit if n < 10 else f"{sign}{n:.0f}{unit}"
+    return f"{sign}{amount:.0f}"
+
+
+def _stage_id(label: str | None) -> str:
+    return (label or "").upper().replace("-", "_").replace(" ", "_")
+
+
+def _fit_line(stage_name: str, n: int, sizes: dict | None, most: dict | None) -> str:
+    """One line on how a lead fits the asked stage, every number a count over Cala's rounds."""
+    if not n:
+        return f"Led no {stage_name} round in Cala" + (f", {most['n']} at {most['stage']}" if most else "")
+    line = f"Led {n} {stage_name} round{'' if n == 1 else 's'} in Cala"
+    if sizes:
+        lo, hi = _money(sizes["min"], sizes["min_currency"]), _money(sizes["max"], sizes["max_currency"])
+        span = lo if lo == hi else f"{lo} to {hi}"
+        line += f", {span}" if sizes["n"] >= n else f", {'one' if sizes['n'] == 1 else sizes['n']} of them {span}"
+    return line
 
 
 def _month(iso: str | None) -> str:
@@ -728,8 +917,9 @@ def _why(e: dict, want_stage: str | None) -> list[dict]:
         out.append({"tone": "plain", "text": "Own record not read (outside the top of this walk)"})
     f = e.get("fit")
     if f:
-        out.append({"tone": "good", "text": f"Has led at {f['stage_name']}"} if f["match"] else
-                   {"tone": "warn", "text": f"Cala lists no {f['stage_name']} round it led"})
+        out.append({"tone": "good" if f["match"] else "warn", "text": f["line"]})
+        if f.get("size_gap"):
+            out.append({"tone": "warn", "text": f["size_gap"]["text"]})
     return out
 
 
@@ -1072,6 +1262,61 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         rd["look_for"] = [[s["key"], s["name"]] for s in softs if s["key"] in joined[rid]]
         rd["_soft_ids"] = {s["key"]: s["ids"] for s in softs if s["key"] in joined[rid]}
     await read_pages(list(rounds.values()) + [rd for s in softs for rd, _ in s.get("_own", [])], PAGE_SECONDS)
+
+    # One firm under two spellings is one investor, in every round of this walk.
+    named: dict[str, dict[str, str]] = collections.defaultdict(dict)   # firm key -> its other spellings, and why they are it
+
+    def all_rounds() -> list[dict]:
+        own = [rd for s in softs for rd, _ in s.get("_own", []) if rd["id"] not in rounds]
+        return list(rounds.values()) + own
+
+    def unite(alias: dict[str, dict], names: dict[str, str]) -> None:
+        for k, a in alias.items():
+            named[a["key"]].update(named.pop(k, {}))
+            named[a["key"]][names[k]] = WHY_SAME[a["why"]]
+        _rename_firms(all_rounds(), alias, tally, findings, claims)
+        not_led.clear()
+        for rd in all_rounds():
+            for k in rd.get("corrected", []) + rd.get("corrected_ids", []):
+                not_led[k].add(rd["id"])
+
+    unite(*_firm_alias(all_rounds(), softs))
+
+    async def cached_rounds(inv: dict) -> dict[str, dict]:
+        """The rounds of an investor's record that some walk has already opened. Read from the cache only: no credit."""
+        out = {}
+        for r in inv["rounds"]:
+            try:
+                rd = await graph.funding_round(cala, r["id"], cache_only=True)
+            except CalaError:
+                rd = None
+            if rd:
+                if not rd["date"]:
+                    rd["date"], rd["date_is_report"] = r["reported"], True
+                out[r["id"]] = rd
+        return out
+
+    for s in softs:   # a deal Cala holds twice counts once in the soft yes's own numbers
+        inv = s.get("_inv")
+        s["_twins"] = {}
+        if not inv or not inv["rounds"]:
+            continue
+        own = {r["id"] for r in inv["rounds"]}
+        same = {**_twins(await cached_rounds(inv)), **{k: v for k, v in canon.items() if k in own and v in own}}
+
+        def head(x: str) -> str:
+            hops = 0
+            while x in same and same[x] != x and hops < 9:
+                x, hops = same[x], hops + 1
+            return x
+
+        deals = {head(r["id"]) for r in inv["rounds"]}
+        n = len(own) - len(deals)
+        if n:
+            led = {head(r["id"]) for r in inv["rounds"] if r["is_lead"]}
+            s.update({"rounds_in_cala": len(deals), "led": len(led), "followed": len(deals) - len(led), "duplicates": n,
+                      "lead_rate": round(len(led) / len(deals), 2)})
+            s["_twins"] = {r: head(r) for r in own if head(r) != r}
     for s in softs:
         # the soft yes's own led rounds: one the page credits to someone else is not a round it led
         s["led_rounds"], s["led_corrected"] = [], []
@@ -1096,16 +1341,10 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
             s["followed"] = max(0, s["followed"] + moved)
             s["lead_rate"] = round(s["led"] / s["rounds_in_cala"], 2)
     _set_aside_stages(list(rounds.values()) + [d for s in softs for d in s.get("led_rounds", [])])
-    for s in softs:   # a deal Cala holds twice counts once
-        n = folded[s["key"]]
-        if n and s.get("rounds_in_cala"):
-            s["rounds_in_cala"] -= n
-            s["followed"] -= n
-            s["duplicates"] = n
-            s["lead_rate"] = round(s["led"] / s["rounds_in_cala"], 2) if s["rounds_in_cala"] else None
-            # the count shown while reading was Cala's own; say why it is lower now
+    for s in softs:
+        if s.get("duplicates"):   # the count shown while reading was Cala's own; say why it is lower now
             await emit({"t": "fold", "key": s["key"], "name": s["name"], "rounds": s["rounds_in_cala"], "led": s["led"],
-                        "followed": s["followed"], "folded": n})
+                        "followed": s["followed"], "folded": s["duplicates"]})
 
     # The founder's own company. Its rounds say who led already, not who could lead next: they are set aside and shown
     # on their own. An investor Cala already lists in the company is not offered as a new lead either.
@@ -1131,29 +1370,34 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
     left_out: dict[str, str] = {}
 
     # 2. Who led those rounds, and who else sat in them.
-    leads: dict[str, dict] = {}
-    cos: dict[str, dict] = {}
-    for rid, rd in rounds.items():
-        with_keys = sorted(joined[rid] | backed[rid])
-        if not (rd.get("issuer") or {}).get("name"):
-            continue   # Cala holds this round without its company: nothing a founder could name
-        for i in rd["investors"]:
-            key = graph.norm(i["name"])
-            if i["id"] in soft_ids or key in soft_keys or not key or _no_name(i["name"]):
-                continue
-            if key in already or graph.family(i["name"]) in already:
-                if i["is_lead"]:
-                    left_out[key] = i["name"]
-                continue
-            book = leads if i["is_lead"] else cos
-            e = book.setdefault(key, {"key": key, "name": i["name"], "ids": [], "kind": i["kind"], "rounds": {}})
-            if i["id"] and i["id"] not in e["ids"]:
-                e["ids"].append(i["id"])
-            if len(i["name"]) and not i["name"].isupper() and e["name"].isupper():
-                e["name"] = i["name"]
-            e["rounds"][rid] = {"with": with_keys, "sources": i["sources"], "lead_reported": i.get("lead_reported") if i["is_lead"] else None,
-                                "check": i.get("check") or ({"status": "report"} if rd.get("via") == "knowledge" and i["is_lead"] else None),
-                                "promoted": bool(i.get("promoted"))}
+    def books() -> tuple[dict[str, dict], dict[str, dict]]:
+        leads: dict[str, dict] = {}
+        cos: dict[str, dict] = {}
+        for rid, rd in rounds.items():
+            with_keys = sorted(joined[rid] | backed[rid])
+            if not (rd.get("issuer") or {}).get("name"):
+                continue   # Cala holds this round without its company: nothing a founder could name
+            for i in rd["investors"]:
+                key = graph.norm(i["name"])
+                if i["id"] in soft_ids or key in soft_keys or not key or _no_name(i["name"]):
+                    continue
+                if key in already or graph.family(i["name"]) in already:
+                    if i["is_lead"]:
+                        left_out[key] = i["name"]
+                    continue
+                book = leads if i["is_lead"] else cos
+                e = book.setdefault(key, {"key": key, "name": i["name"], "ids": [], "kind": i["kind"], "rounds": {}})
+                for uid in [i["id"]] + i.get("more_ids", []):
+                    if uid and uid not in e["ids"]:
+                        e["ids"].append(uid)
+                if len(i["name"]) and not i["name"].isupper() and e["name"].isupper():
+                    e["name"] = i["name"]
+                e["rounds"][rid] = {"with": with_keys, "sources": i["sources"], "lead_reported": i.get("lead_reported") if i["is_lead"] else None,
+                                    "check": i.get("check") or ({"status": "report"} if rd.get("via") == "knowledge" and i["is_lead"] else None),
+                                    "promoted": bool(i.get("promoted"))}
+        return leads, cos
+
+    leads, cos = books()
 
     def evidence(e: dict) -> list[dict]:
         out = []
@@ -1211,15 +1455,18 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                 CHECK_WEIGHT.get((d.get("check") or {}).get("status"), CHECK_WEIGHT["unread"]) for d in ev)
         return s * (1 + 0.35 * (len({k for d in ev for k in d["with_keys"]}) - 1))
 
-    for e in list(leads.values()) + list(cos.values()):
-        for uid in (aliases(e["key"]) if aliases else []):
-            if uid not in e["ids"]:
-                e["ids"].append(uid)
-    for e in leads.values():
-        e["evidence"] = evidence(e)
-        e["ring"] = 1
-        e["score"] = base_score(e["evidence"]) * (0.75 if e["kind"] == "person" else 1.0)
-    order = sorted(leads.values(), key=lambda e: e["score"], reverse=True)
+    def weigh() -> list[dict]:
+        for e in list(leads.values()) + list(cos.values()):
+            for uid in (aliases(e["key"]) if aliases else []):
+                if uid not in e["ids"]:
+                    e["ids"].append(uid)
+        for e in leads.values():
+            e["evidence"] = evidence(e)
+            e["ring"] = 1
+            e["score"] = base_score(e["evidence"]) * (0.75 if e["kind"] == "person" else 1.0)
+        return sorted(leads.values(), key=lambda e: e["score"], reverse=True)
+
+    order = weigh()
     await emit({"t": "leads", "count": len(order), "top": [{"key": e["key"], "name": e["name"]} for e in order[:12]]})
 
     # 3. Each lead's own record: does it lead often, recently, at this stage?
@@ -1258,6 +1505,33 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                     "led": e["pulse"]["led"], **ledger.as_dict()})
 
     await asyncio.gather(*(read_pulse(e) for e in order[:PULSE_TOP]), *(read_pulse(e, free=True) for e in order[PULSE_TOP:]))
+
+    # A lead named in a report and a lead Cala holds as an entity can be one firm ('Inveready', 'Inveready Capital
+    # Company'). They are, when one name is the other plus plain fund words and both carry the same Cala record.
+    pool = {**cos, **leads}
+    pairs = [(a["key"], b["key"], "record") for n, a in enumerate(list(pool.values())) for b in list(pool.values())[n + 1:]
+             if a["kind"] != "person" and b["kind"] != "person" and set(a["ids"]) & set(b["ids"]) and _same_firm(a["name"], b["name"])]
+    pairs += [(s["key"], e["key"], "record") for s in softs for e in pool.values()
+              if e["kind"] != "person" and set(e["ids"]) & set(s["ids"]) and _same_firm(e["name"], s["name"])]
+    if pairs:
+        names = {e["key"]: e["name"] for e in pool.values()} | {s["key"]: s["name"] for s in softs}
+        alias = _groups(pairs, names, soft_keys, collections.Counter({e["key"]: len(e["rounds"]) for e in pool.values()}))
+        unite(alias, names)
+        was = (leads, cos)
+        leads, cos = books()
+        for book in (leads, cos):
+            for key, e in book.items():   # what was already read about the firm, under any of its spellings, stays read
+                olds = [o for k in [key] + [m for m, a in alias.items() if a["key"] == key] for b in was for o in [b.get(k)] if o]
+                for o in olds:
+                    e["ids"] += [uid for uid in o["ids"] if uid not in e["ids"]]
+                invs = list({id(o["_inv"]): o["_inv"] for o in olds if o.get("_inv")}.values())
+                if invs:
+                    e["_inv"] = invs[0] if len(invs) == 1 else _merge(invs)
+                    e["pulse"] = _pulse(e["_inv"])
+                    e["portfolio"] = e["_inv"]["portfolio"][:150]
+                elif olds and all(o.get("record") == "missing" for o in olds):
+                    e["record"] = "missing"
+        order = weigh()
 
     # 4. Second ring: investors who sat in those rounds without leading, but lead elsewhere.
     ring2 = sorted((c for k, c in cos.items() if k not in leads and c["kind"] == "fund"),
@@ -1366,12 +1640,24 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
 
     for e in order + second:
         if e.get("_inv"):
-            k = _record(e["key"], e["_inv"], dates_for(e), led_too(e), canon, not_led_by(e), labels, checks_for(e))
+            e["_held"] = await cached_rounds(e["_inv"])   # free: only what is already cached
+            k = _record(e["key"], e["_inv"], dates_for(e), led_too(e), {**canon, **_twins(e["_held"])}, not_led_by(e), labels,
+                        checks_for(e))
             e["pulse"] = _pulse({**e["_inv"], "rounds": k.get("rounds") or e["_inv"]["rounds"]}, k["dates"], k["led_too"],
                                 k["canon"], set(k["not_led"]), k["labels"], k.get("checks"))
+            # Every round counted as led is looked up by its own id, so the size line never depends on which of the
+            # firm's Cala records this walk happened to read. Cache only: no credit.
+            for rid, _ in e["pulse"].get("led_list") or []:
+                if rid not in e["_held"]:
+                    try:
+                        rd = await graph.funding_round(cala, rid, cache_only=True)
+                    except CalaError:
+                        rd = None
+                    if rd:
+                        e["_held"][rid] = rd
     for s in softs:
         if s.get("_inv"):
-            k = _record(s["key"], s["_inv"], opened, {}, canon, not_led_by(s), labels, checks_for(s))
+            k = _record(s["key"], s["_inv"], opened, {}, {**canon, **s.get("_twins", {})}, not_led_by(s), labels, checks_for(s))
             s["pulse"] = _pulse({**s["_inv"], "rounds": k.get("rounds") or s["_inv"]["rounds"]}, k["dates"], k["led_too"],
                                 k["canon"], set(k["not_led"]), k["labels"], k.get("checks"))
 
@@ -1388,9 +1674,15 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                 "text": f"Cala's record under this name reads \"{desc.rstrip('.')}\", yet it is listed leading a round in "
                         f"{min(years)}. The name is probably tied to the wrong company in Cala: read the source before you use it."}
 
+    # The sizes of the rounds at the asked stage that the soft yeses joined: what a round like the founder's looks like here.
+    joined_sizes = sorted((rd["amount"], rd["currency"]) for rid, rd in rounds.items()
+                          if want_stage and joined[rid] and rd.get("stage") == want_stage
+                          and rd.get("amount") and rd.get("currency") in ("EUR", "USD"))
+
     def finish(e: dict) -> dict:
         ev = e["evidence"]
         pulse = e.get("pulse")
+        led_list = pulse.pop("led_list", []) if pulse else []
         led_known = [{k: d[k] for k in ("id", "issuer", "stage", "stage_name", "date", "amount", "currency", "sources",
                                         "stage_set_aside", "stage_page", "off_page", "check") if k in d}
                      for d in ev] if e["ring"] == 1 else []
@@ -1431,11 +1723,36 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                            if (s["stage"] or "").upper().replace("-", "_").replace(" ", "_") == rank_stage), 0)
             at_stage = max(n, listed)
             long_record = ((pulse or {}).get("led") or 0) >= 3
-            # A lead that has led at this stage moves up; one with a real record and no such round moves down.
+            # A lead that has led at this stage moves up, more for each such round up to five; one with a real record
+            # and no such round moves down.
             if want_stage:
-                e["score"] *= 1.15 if at_stage else 0.6 if long_record else 0.8
-                fit = {"stage": want_stage, "stage_name": graph.STAGE_NAMES.get(want_stage, want_stage),
-                       "led_at_stage": at_stage, "match": at_stage > 0}
+                at_stage = max(n, sum(1 for _, label in led_list if _stage_id(label) == want_stage))
+                e["score"] *= (1 + 0.1 * min(at_stage, 5)) if at_stage else 0.6 if long_record else 0.8
+                # how large those rounds were: from the rounds this walk opened, else as Cala holds the round
+                known, held, sized, done = {d["id"]: d for d in led_known}, e.get("_held") or {}, [], set()
+                for rid in [d["id"] for d in led_known if d["stage"] == want_stage] + \
+                        [rid for rid, label in led_list if _stage_id(label) == want_stage]:
+                    d = known[rid] if rid in known else held.get(rid)
+                    # only where the round's own record carries the stage too: a "seed" of a billion is a slip in the label
+                    if d and rid not in done and d.get("stage") == want_stage and not any(_same_deal(d, k) for k in sized) and \
+                            d.get("amount") and d.get("currency") in ("EUR", "USD"):
+                        sized.append(d)
+                    done.add(rid)
+                sized = sorted(sized, key=lambda d: d["amount"])[:max(at_stage, 0)]
+                sizes = {"min": sized[0]["amount"], "min_currency": sized[0]["currency"], "max": sized[-1]["amount"],
+                         "max_currency": sized[-1]["currency"], "n": len(sized)} if sized else None
+                name = graph.STAGE_NAMES.get(want_stage, want_stage)
+                most = next((s for s in (pulse or {}).get("led_stages", []) if _stage_id(s["stage"]) != want_stage), None)
+                fit = {"stage": want_stage, "stage_name": name, "led_at_stage": at_stage, "match": at_stage > 0,
+                       "sizes": sizes, "line": _fit_line(name, at_stage, sizes, most)}
+                # Its rounds at this stage are all far larger, or all far smaller, than the ones the soft yeses joined.
+                if sizes and sizes["n"] >= 2 and len(joined_sizes) >= 3:
+                    lo, hi = joined_sizes[0], joined_sizes[-1]
+                    gap = "larger" if sizes["min"] > 3 * hi[0] else "smaller" if sizes["max"] < lo[0] / 3 else None
+                    if gap:
+                        e["score"] *= 0.8
+                        fit["size_gap"] = {"way": gap, "text": f"Those rounds are far {gap} than the {name} rounds "
+                                           f"{_names([s['name'] for s in softs])} joined ({_money(*lo)} to {_money(*hi)})"}
             else:
                 e["score"] *= 1.1 if at_stage else 0.75 if long_record else 0.9
         amounts = sorted(d["amount"] for d in led_known if d["amount"] and d["currency"] in ("EUR", "USD"))
@@ -1444,6 +1761,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                 "asks": ask, "pulse": pulse, "led_recent": led_recent, "record": e.get("record"), "doubt": unsure, "wrong_entity": bool(unsure),
                 "confirmed": confirmed, "checked": looked, "reported": reported,
                 "recent_leads": led_known[:4], "last_led": last_led, "fit": fit,
+                # the other spellings Cala holds this firm under, each with why it is the same firm
+                "also_named": [{"name": n, "why": w} for n, w in sorted(named.get(e["key"], {}).items())],
                 # a range from one or two rounds says nothing about what it usually writes
                 "typical_round": {"min": amounts[0], "max": amounts[-1], "n": len(amounts)} if len(amounts) >= 3 else None,
                 "portfolio": e.get("portfolio", [])}
@@ -1470,7 +1789,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         soft_out.append({k: s.get(k) for k in ("key", "name", "ids", "kind", "found", "rounds_in_cala", "led", "followed",
                                                 "lead_rate", "walked", "capped", "pulse", "description", "led_rounds", "led_corrected", "cap_companies",
                                                 "entities", "knowledge", "duplicates", "doubt")}
-                        | {"reports": (s.get("knowledge") or {}).get("added") or 0,
+                        | {"also_named": [{"name": n, "why": w} for n, w in sorted(named.get(s["key"], {}).items())],
+                           "reports": (s.get("knowledge") or {}).get("added") or 0,
                            "usual_leads": [{"name": n, "deals": c} for n, c in counts.most_common(5)],
                            "followed_rounds": sorted(
                                ({**_round_brief(rd), "leads": [i["name"] for i in rd["investors"] if i["is_lead"]],
@@ -1483,6 +1803,7 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
 
     for s in soft_out:
         s["verdict"], s["insight"] = _verdict(s)
+        (s.get("pulse") or {}).pop("led_list", None)
 
     urls = set()
     facts = 0
@@ -1516,6 +1837,9 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
         # facts Cala attaches to a round from pages older than the round: shown with a caution, or left out
         "set_aside": sum(bool(d.get("caution")) + bool(d.get("amount_set_aside")) for e in first + second_out for d in e["evidence"]),
         "rounds_walked": len(rounds), "duplicates_folded": folded["_all"],
+        # spellings this walk counted as one firm: [{name, also: [{name, why}]}]
+        "merged_firms": [{"name": next((x["name"] for x in first + second_out + soft_out if x["key"] == k), k),
+                          "also": [{"name": n, "why": w} for n, w in sorted(v.items())]} for k, v in sorted(named.items()) if v],
         # the founder's own rounds, kept out of the walk, and leads left out because Cala already lists them in the company
         "own": {"company": mine, "rounds": own_rounds[:4], "already_in": sorted(left_out.values())} if mine.get("id") else None,
         # the pages Cala cites, re-read: how many "led" claims they confirm, correct or leave open

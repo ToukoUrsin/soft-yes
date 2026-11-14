@@ -234,16 +234,16 @@ def _finish(kind: str, subject: str, body: str, result: dict, lead: dict, founde
             "chars": len(body), "checked": True, **more}
 
 
-def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
-    """Deterministic draft, used when Gemini is off or says something the facts do not support."""
+BLANKS = ("[your company]", "[what you do]", "[your round]")   # the founder's own words: code puts them in, no model sees them
+
+
+def template(result: dict, lead: dict, kind: str) -> dict:
+    """The message built in code from the facts, with the founder's words left as blanks. Used when Gemini is off
+    or says something the facts do not support."""
     name = lead["name"]
     ask = lead.get("ask") or {}
     soft = ask.get("name") or (result["soft_yeses"][0]["name"] if result["soft_yeses"] else "our investor")
     deal = deal_phrase(ask["last"]) if ask.get("last") else None
-    company = founder.get("company") or "[your company]"
-    raising = re.sub(r"^(an?|our|the)\s+", "", founder.get("raising") or "", flags=re.I) or "[round]"
-    a_raising = ("an " if raising[:1].lower() in "aeiou8" else "a ") + raising if raising != "[round]" else raising
-    one = _stop(founder.get("one_liner") or "") or "[one line on what you do]"
     last = ask.get("last") or {}
     co_led = bool(last.get("co_leads")) and lead["ring"] == 1
     led_verb = ("co-led" if co_led else "led") if lead["ring"] == 1 else "joined"
@@ -251,25 +251,69 @@ def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
     named = not any(w == soft and on is False for w, on in zip(last.get("with") or [], last.get("with_on_page") or []))
     if kind == "intro_ask":
         subject = f"Intro to {name}?"
-        body = (f"Hi,\n\nYou said {soft} would join our {raising} once a lead is in. "
+        body = (f"Hi,\n\nYou said {soft} would join our round once a lead is in. "
                 + (f"{name} {led_verb} {deal}, " + (f"with {soft} in the round. " if named else f"and {soft} is listed as an investor there. ")
                    if deal else "")
                 + f"Would you introduce us to the partner you worked with there?\n\n"
-                  f"Two lines you can forward: {company}: {one} We are raising {a_raising} and {soft} has said it will follow.\n\nThanks")
+                  f"Two lines you can forward: [your company]: [what you do]. We are raising [your round] and {soft} has said it will follow.\n\nThanks")
     elif kind == "slush":
         subject = ""
-        body = (f"{soft} has said it will join {company}'s {raising} once a lead is in. "
-                + (f"You {led_verb} {deal} with them. " if deal else "")
+        body = (f"[your company] is raising [your round]. {soft} has said it will join once a lead is in. "
+                + (f"You {led_verb} {deal} with them. " if deal and named else "")
                 + "Could we meet at Slush to see if you'd lead?")
-        if len(body) > 300:
-            body = f"{soft} will follow in {company}'s {raising}. " + (f"You {led_verb} {deal} with them. " if deal else "") + "Meet at Slush?"
-        body = body[:300]
+        if len(body) > 280:
+            body = f"[your company] is raising [your round]. {soft} will follow a lead. Could we meet at Slush to see if you'd lead?"
     else:
-        subject = f"{company}: {raising}, {soft} is in"
-        body = (f"Hi,\n\n{company}: {one}\n\nWe are raising {a_raising}. {soft} has said it will join once a lead is in. "
-                + (f"You {led_verb} {deal} with {soft} in the round, which is why I'm writing to you first. " if deal else "")
+        subject = f"[your company]: {soft} is in, we are looking for a lead"
+        body = (f"Hi,\n\n[your company]: [what you do].\n\nWe are raising [your round]. {soft} has said it will join once a lead is in. "
+                + (f"You {led_verb} {deal} with {soft} in the round, which is why I'm writing to you first. " if deal and named else "")
                 + "Could we find time for a short call this week?\n\nThanks")
     return {"subject": subject, "body": body}
+
+
+def round_words(stage_name: str | None) -> str:
+    """The round as a founder writes it when they have not said: 'a Series A', 'a seed round'."""
+    if not stage_name:
+        return ""
+    return f"a {stage_name}" if stage_name.lower().startswith("series") else f"a {stage_name.lower()} round"
+
+
+def founder_words(result: dict, founder: dict) -> dict:
+    """The founder's words for a draft. What they did not type comes from the run itself, the same on every surface:
+    the company the walk was started for, and the stage that was asked."""
+    out = {k: str(founder.get(k) or "").strip() for k in ("company", "one_liner", "raising", "name")}
+    out["company"] = out["company"] or ((result.get("input") or {}).get("company") or {}).get("name") or ""
+    out["raising"] = out["raising"] or round_words((result.get("input") or {}).get("stage_name"))
+    return out
+
+
+def fill(text: str, founder: dict) -> str:
+    """Put the founder's own words where the blanks are. A blank with no words for it stays a blank."""
+    if founder.get("company"):
+        text = text.replace("[your company]", founder["company"])
+    one = _stop(founder.get("one_liner") or "")
+    if one:
+        text = text.replace("[what you do].", one).replace("[what you do]", one)
+    core = re.sub(r"^(an?|our|the)\s+", "", founder.get("raising") or "", flags=re.I).strip().rstrip(".")
+    if core:
+        text = text.replace("[your round]", ("an " if core[:1].lower() in "aeiou8" else "a ") + core)
+    return text
+
+
+def blanks_ok(subject: str, body: str) -> list[str]:
+    """The blanks sit where code can fill them: the company and its line as '[your company]: [what you do].', the
+    round after 'raising'. Returns what is wrong, as words for the model."""
+    text = subject + "\n" + body
+    bad = [b for b in dict.fromkeys(re.findall(r"\[[^\]]*\]", text)) if b not in BLANKS]
+    if text.count("[what you do]") != text.count("[your company]: [what you do]."):
+        bad.append("[what you do] outside '[your company]: [what you do].'")
+    if text.count("[your round]") != len(re.findall(r"(?i)\braising \[your round\]", text)):
+        bad.append("[your round] not right after 'raising'")
+    if "[your round]" not in body:
+        bad.append("(the round is missing: write 'raising [your round]')")
+    if "[your company]" not in text:
+        bad.append("(the company is missing: write [your company])")
+    return bad
 
 
 INVENTED = re.compile(r"\b(meeting with us|met with us|when we (?:spoke|met|talked)|since we (?:spoke|met|talked)|"
@@ -308,83 +352,114 @@ def verify_draft(text: str, facts: list[str], founder: dict) -> list[str]:
     return list(dict.fromkeys(bad))
 
 
+DRAFT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _draft_ok(subject: str, body: str, facts: list[str], kind: str) -> list[str]:
+    """Everything a draft from the model has to pass before anyone sees it. Returns what it got wrong."""
+    if kind == "slush" and len(body) > 280:
+        return ["(over 280 characters)"]
+    bad = verify_draft(re.sub(r"\[[^\]]*\]", " ", subject + "\n" + body), facts, {})
+    if not bad:   # a meeting, a call or an opinion is a claim too, and no fact carries one
+        bad = list(dict.fromkeys(m.group(0).lower() for m in INVENTED.finditer(body)))
+    if not bad and any("does not name" in f for f in facts) and \
+            re.search(r"took part|alongside|participat|you joined|you were in|with you in|you invested", body, re.I):
+        bad = ["that you took part (the announcement does not name you)"]
+    return bad or blanks_ok(subject, body)
+
+
+async def _wording(result: dict, lead: dict, kind: str, llm: bool) -> dict:
+    """The one wording of this message for this run and lead: {subject, body, model, dropped, why}. Written once,
+    kept, and handed to every surface that asks. The founder's own words are blanks in it."""
+    facts = cala_facts(result, lead)
+    said = sorted({w for d in lead["evidence"] for w in d["with"]})
+    if said:
+        facts = facts + [f"{' and '.join(said)} told the founder: we will invest once a lead investor is in."]
+    stamp = hashlib.sha1("\x1f".join(facts).encode()).hexdigest()[:16]
+    key = f"ask:{result['run_id']}:{lead['key']}:{kind}"
+    built = {**template(result, lead, kind), "model": None, "dropped": []}
+    async with DRAFT_LOCKS.setdefault(key, asyncio.Lock()):
+        kept = blob_get(key)
+        if kept and kept.get("model") and not _draft_ok(kept["subject"], kept["body"], facts, kind):
+            return kept
+        if kept and not kept.get("model") and kept.get("facts") == stamp:
+            return {**built, "dropped": kept.get("dropped") or []}   # the model was tried on these facts and dropped
+        if not llm or not gemini_ready():
+            return built
+        ask = lead.get("ask") or {}
+        soft = ask.get("name") or ""
+        brief = {
+            "intro_ask": f"An email from the founder to the person at {soft} who told them {soft} will invest once a lead investor is "
+                         f"in. Write to that person as 'you': {soft} is 'you', never 'they' or its name. Open with 'Hi,'. First recall "
+                         f"that they said they would join once a lead is in. Then ask for one introduction, to {lead['name']}, and give "
+                         f"the reason as something they know first hand: the most recent round {lead['name']} led that they were in "
+                         f"(company, stage, month), and how many such rounds there are if FACTS give more than one. Say 'co-led' when "
+                         f"FACTS say co-led. Give no statistics about {lead['name']}: they know the firm. "
+                         f"End with two lines they can forward: '[your company]: [what you do].' and then 'We are raising "
+                         f"[your round]' with that they will follow. 70-100 words. Do not mention Cala.",
+            "direct": f"A cold email from the founder to a partner at {lead['name']}. Write to them as 'you': {lead['name']} is "
+                      f"'you', never its name or 'they'. Open with 'Hi,', then '[your company]: [what you do].' and 'We are raising "
+                      f"[your round].' Then say {soft} has told us it will invest once a lead is in. Then why you "
+                      f"write to them first: the most recent round they led with {soft} in it (company, stage, month, and the amount "
+                      f"only if FACTS give one), and how many such rounds there are if FACTS give more than one. Ask for a short call, "
+                      f"with no length in minutes. 60-90 words. Do not mention Cala.",
+            "slush": f"A meeting request note for the Slush meeting tool, from the founder to {lead['name']}. Write to them as 'you'. "
+                     f"Hard limit 230 characters, two or three sentences: '[your company] is raising [your round].', "
+                     f"that {soft} will invest once a lead is in, the most recent round they led with {soft} in it (company "
+                     f"and stage), and a request to meet at Slush, with no length in minutes. Do not mention Cala.",
+        }[kind]
+        system = ("You write short, plain fundraising messages for a startup founder. Use ONLY the facts in FACTS. "
+                  "When FACTS say an investor 'is listed as an investor in that round, but the announcement does not name' it, "
+                  "write, to that investor, 'a round you are listed in as an investor'; never write that it took part, joined, or was "
+                  "alongside. Write 'co-led' wherever FACTS say co-led. "
+                  "Never add a name, number, date, title, sector or claim that is not in FACTS. FACTS say what an investor told "
+                  "us, not how or when: never write that you met, spoke, called or had a meeting, never thank them for one, and "
+                  "give no opinion on fit. No flattery, no buzzwords, "
+                  "no exclamation marks, no em dashes, no repeated phrases. Sound like a founder writing to someone they have "
+                  "met: direct and warm. First person plural for the company. "
+                  "The founder's own words are not in FACTS and are put in later, so write them as three blanks, exactly like "
+                  "this: the company's name is [your company]; what it does is written only as the sentence "
+                  "'[your company]: [what you do].'; the round is written only as 'raising [your round]' ([your round] stands "
+                  "for words like 'a Series A'). Use no other bracketed blank, and say nothing else about what the company does. "
+                  'Return JSON: {"subject": "...", "body": "..."}. For a Slush note the subject is empty.')
+        user = "FACTS:\n" + "\n".join(f"- {f}" for f in facts) + f"\n\nWRITE: {brief}"
+        wrong: list[str] = []
+        dropped: list[str] = []   # what an earlier draft added beyond the facts, so the founder can see the check at work
+        answered = False
+        for attempt in range(2):
+            out = await gemini_json(system, user + (f"\n\nYour last draft got this wrong: {', '.join(wrong)}. Fix it."
+                                                   if wrong else ""))
+            if not isinstance(out, dict) or not isinstance(out.get("body"), str):
+                break
+            answered = True
+            body = out["body"].strip().replace("—", ", ")
+            subject = str(out.get("subject") or "").strip()
+            wrong = _draft_ok(subject, body, facts, kind)
+            if not wrong:
+                kept = {"subject": subject, "body": body, "model": GEMINI_MODEL, "dropped": dropped, "facts": stamp}
+                blob_put(key, kept)
+                return kept
+            if wrong != blanks_ok(subject, body):   # a blank in the wrong place is no invented fact: not shown as one
+                dropped = wrong[:6]
+        if answered:   # the model was heard and its drafts were dropped: the built one is the wording for these facts
+            blob_put(key, {**built, "dropped": dropped, "facts": stamp})
+        return {**built, "dropped": dropped}
+
+
 async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = True) -> dict:
-    facts = fact_sheet(result, lead, founder)
-    fallback = template(result, lead, kind, founder)
-    if not llm or not gemini_ready():
-        return _finish(kind, fallback["subject"], fallback["body"], result, lead, founder, model=None, fallback=True,
-                       note="Built from the facts below without a language model.")
-    ask = lead.get("ask") or {}
-    soft = ask.get("name") or ""
-    brief = {
-        "intro_ask": f"An email from the founder to the person at {soft} who told them {soft} will invest once a lead investor is "
-                     f"in. Write to that person as 'you': {soft} is 'you', never 'they' or its name. Open with 'Hi,'. First recall "
-                     f"that they said they would join once a lead is in. Then ask for one introduction, to {lead['name']}, and give "
-                     f"the reason as something they know first hand: the most recent round {lead['name']} led that they were in "
-                     f"(company, stage, month), and how many such rounds there are if FACTS give more than one. Say 'co-led' when "
-                     f"FACTS say co-led. Give no statistics about {lead['name']}: they know the firm. "
-                     f"End with a two-line blurb they can forward: what the company does, and the round being raised exactly as in "
-                     f"FACTS. 70-100 words. Do not mention Cala.",
-        "direct": f"A cold email from the founder to a partner at {lead['name']}. Write to them as 'you': {lead['name']} is "
-                  f"'you', never its name or 'they'. Open with 'Hi,', then one sentence on what the company does and the round "
-                  f"being raised exactly as in FACTS. Then say {soft} has told us it will invest once a lead is in. Then why you "
-                  f"write to them first: the most recent round they led with {soft} in it (company, stage, month, and the amount "
-                  f"only if FACTS give one), and how many such rounds there are if FACTS give more than one. Ask for a short call, with no length in minutes. "
-                  f"60-90 words. Do not mention Cala.",
-        "slush": f"A meeting request note for the Slush meeting tool, from the founder to {lead['name']}. Write to them as 'you'. "
-                 f"Hard limit 280 characters, two or three sentences: what the company does in a few words and the round being "
-                 f"raised, that {soft} will invest once a lead is in, the most recent round they led with {soft} in it (company "
-                 f"and stage), and a request to meet at Slush, with no length in minutes. Do not mention Cala.",
-    }[kind]
-    system = ("You write short, plain fundraising messages for a startup founder. Use ONLY the facts in FACTS. "
-              "When FACTS say an investor 'is listed as an investor in that round, but the announcement does not name' it, "
-              "write, to that investor, 'a round you are listed in as an investor'; never write that it took part, joined, or was "
-              "alongside. Write 'co-led' wherever FACTS say co-led. "
-              "Never add a name, number, date, title, sector or claim that is not in FACTS. FACTS say what an investor told "
-              "us, not how or when: never write that you met, spoke, called or had a meeting, never thank them for one, and "
-              "give no opinion on fit. No flattery, no buzzwords, "
-              "no exclamation marks, no em dashes, no repeated phrases. Sound like a founder writing to someone they have "
-              "met: direct and warm. First person plural for the company. Only three things may be a bracketed placeholder "
-              "when FACTS lack them: [your company], [what you do], [your round]. Any other missing detail is left out. "
-              'Return JSON: {"subject": "...", "body": "..."}. For a Slush note the subject is empty.')
-    user = "FACTS:\n" + "\n".join(f"- {f}" for f in facts) + f"\n\nWRITE: {brief}"
-    unsupported: list[str] = []
-    dropped: list[str] = []   # what an earlier draft added beyond the facts, so the founder can see the check at work
-    # The same facts and the same words from the founder get the same message: a reload does not reword it or wait again.
-    memo = "draft:" + hashlib.sha1("\x1f".join((kind, GEMINI_MODEL, system, user)).encode()).hexdigest()
-    kept = blob_get(memo)
-    if kept and not INVENTED.search(kept["body"]) and \
-            not verify_draft(re.sub(r"\[[^\]]*\]", " ", kept["subject"] + "\n" + kept["body"]), facts, founder):
-        was = kept.get("dropped") or []
-        return _finish(kind, kept["subject"], kept["body"], result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=was,
-                       note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
-                            + (f" Its first draft was dropped: it added {', '.join(was[:4])}." if was else ""))
-    for attempt in range(2):
-        out = await gemini_json(system, user + (f"\n\nYour last draft used words that are not in FACTS: {', '.join(unsupported)}. Remove them."
-                                               if unsupported else ""))
-        if not isinstance(out, dict) or not isinstance(out.get("body"), str):
-            break
-        body = out["body"].strip().replace("—", ", ")
-        subject = str(out.get("subject") or "").strip()
-        if kind == "slush" and len(body) > 300:
-            unsupported = ["(over 300 characters)"]
-            continue
-        unsupported = verify_draft(re.sub(r"\[[^\]]*\]", " ", subject + "\n" + body), facts, founder)
-        if not unsupported:   # a meeting, a call or an opinion is a claim too, and no fact carries one
-            unsupported = list(dict.fromkeys(m.group(0).lower() for m in INVENTED.finditer(body)))
-        if not unsupported and any("does not name" in f for f in facts) and \
-                re.search(r"took part|alongside|participat|you joined|you were in|with you in|you invested", body, re.I):
-            unsupported = ["that you took part (the announcement does not name you)"]
-        if not unsupported:
-            blob_put(memo, {"subject": subject, "body": body, "dropped": dropped})
-            return _finish(kind, subject, body, result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=dropped,
-                           note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
-                                + (f" Its first draft was dropped: it added {', '.join(dropped[:4])}." if dropped else ""))
-        dropped = unsupported[:6]
-    return _finish(kind, fallback["subject"], fallback["body"], result, lead, founder, model=None, fallback=True,
-                   note="Built from the facts below without a language model."
-                        + (f" Gemini's version was dropped: it added {', '.join(unsupported[:4])}." if unsupported else ""),
-                   rejected=unsupported[:6])
+    """One message per run, lead and kind, the same wherever it is asked for: the run page, the card, the MCP tool.
+    Gemini words it once from Cala's facts; code checks it; the founder's own words go into its blanks in code."""
+    founder = founder_words(result, founder)
+    w = await _wording(result, lead, kind, llm)
+    was = w.get("dropped") or []
+    if w.get("model"):
+        note = "Written by Gemini. Every name and number in it is in Cala's facts or in your own words below." + \
+            (f" Its first draft was dropped: it added {', '.join(was[:4])}." if was else "")
+    else:
+        note = "Built from the facts below without a language model." + \
+            (f" Gemini's version was dropped: it added {', '.join(was[:4])}." if was else "")
+    return _finish(kind, fill(w["subject"], founder), fill(w["body"], founder), result, lead, founder,
+                   model=w.get("model"), fallback=not w.get("model"), note=note, rejected=was[:6])
 
 
 # ---------------------------------------------------------------------------------------------- says vs did
