@@ -85,6 +85,46 @@ const LINES = [
 	['next', 0.35, `${cap(words(N.slush.leads_attending))} of these leads are at Slush ${slushWhen()}. The request is ready to send.`],
 	['close', 0.45, "Soft Yes. Turn we're in if you find a lead, into a lead."],
 ];
+// ---- the cut made inside Claude (--cut3): numbers from src/data/cap3.json (film/capture/claude_shots.py)
+const CUT3 = A.includes('--cut3');
+const lines3 = () => {
+	const C3 = JSON.parse(fs.readFileSync(path.join(film, 'src/data/cap3.json'), 'utf8'));
+	const F = need(C3.cfind?.facts, 'cfind'), Li = need(C3.clist?.facts, 'clist'), Wk = need(C3.cwalk?.facts, 'cwalk'), D = need(C3.cdraft?.facts, 'cdraft');
+	const facts = +need(/([\d,]+) facts/.exec(F.ledger[0])?.[1], 'the count of facts').replace(/,/g, '');
+	if (!/^From a language model 0 facts/.test(F.ledger[3])) throw new Error('the card no longer shows 0 facts from a language model: rewrite the narration');
+	const top = Li.leads[0];
+	const when = new Date(C3.clist.at).toLocaleString('en-US', {month: 'short', year: 'numeric', timeZone: 'UTC'});
+	const led = /^Led (.+?)’s (pre-seed|seed|Series \w) in (\w+ \d+)$/.exec(top.line);
+	if (!led || !Li.proof?.includes('The page says it led')) throw new Error(`the first investor is no longer one the page says led a round ("${top.line}"): rewrite the narration`);
+	const way = Li.way;
+	const sat = /Sat in (\d+) rounds? with ([^,]+), an investor in/.exec(way.line);
+	if (!sat) throw new Error(`the way in no longer reads "Sat in N rounds with X" ("${way.line}"): rewrite the narration`);
+	const chk = /(\d+) “led” claims hold word for word, (\d+) do not/.exec(Wk.read);
+	if (!chk) throw new Error(`the walk no longer says "N led claims hold, M do not" ("${Wk.read}"): rewrite the narration`);
+	const lead = D.leads[0];
+	const round = /^Led (\S+)/.exec(lead.line);
+	const door = /^(.+?) opens the door: it was in that round/.exec(lead.door || '');
+	if (!round || !door) throw new Error(`the first lead no longer has a door ("${lead.line}", "${lead.door}"): rewrite the narration`);
+	const stage = led[2].startsWith('Series') ? led[2] : led[2];
+	return [
+		['ask', 0.2, `You're raising a ${stage} round. Who do you talk to? Ask Claude.`],
+		['draw', 0.25, "Soft Yes asks Cala's graph for companies like yours."],
+		['draw', 0.3, 'It reads their rounds, and who invested.'],
+		['draw', 0.3, 'And the rounds investors you know sat in. Anyone in those is one intro away.'],
+		['draw', 0.3, "Then it reads Cala's record of each investor. Does it lead rounds? Is it still investing?"],
+		['draw', 0.35, `${cap(words(facts))} facts from Cala. None from a language model.`],
+		['list', 0.3, `Start with ${top.name}. It led a ${stage} like yours ${led[3] === when ? 'this month' : 'in ' + led[3].split(' ')[0]}. Cala's source page says so.`],
+		['list', 0.4, `${way.name} sat in ${words(+sat[1])} rounds with ${first(sat[2])}, an investor you know. That's your way in.`],
+		['soft', 0.3, "Later, two investors say: we're in, if you find a lead."],
+		['soft', 0.4, "That's a soft yes. So it finds who led the rounds they joined."],
+		['soft', 0.3, `Then it reads Cala's source page for every lead. ${cap(words(+chk[1]))} check out. ${cap(words(+chk[2]))} don't.`],
+		['draft', 0.3, `${lead.name} led ${say(round[1])}'s round with ${door[1]} in it. So ${door[1]} opens the door.`],
+		['draft', 0.35, `One click writes the ask to ${door[1]}.`],
+		['draft', 1.2, "Every fact in it is listed, with where it's from."],
+		['close', 0.45, "Soft Yes. Find your investors in Cala's graph, in Claude."],
+	];
+};
+if (CUT3) LINES.splice(0, LINES.length, ...lines3());
 if (A.includes('--print')) {
 	let last = '';
 	for (const l of LINES) {
@@ -140,7 +180,7 @@ for (let i = 0; i < LINES.length; i++) {
 }
 
 // The music is made for the length of this cut: the same sum the film's timeline makes (src/data.ts).
-const T = JSON.parse(fs.readFileSync(path.join(film, 'src/data/timing.json'), 'utf8'));
+const T = JSON.parse(fs.readFileSync(path.join(film, CUT3 ? 'src/data/timing3.json' : 'src/data/timing.json'), 'utf8'));
 const starts = {};
 let total = 0;
 for (const id of T.order) {
@@ -149,15 +189,19 @@ for (const id of T.order) {
 }
 const secs = Math.ceil(total);
 let music = null;
-const mf = path.join(out, `music-${secs}.mp3`);
+const mf = path.join(out, `music-${CUT3 ? 'c3-' : ''}${secs}.mp3`);
 const at = (id, plus = 0) => `${Math.round(starts[id] + plus)} s`;
 if (A.includes('--music') && !fs.existsSync(mf)) {
 	const r = await fetch('https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128', {
 		method: 'POST',
 		headers: {'xi-api-key': KEY, 'content-type': 'application/json'},
 		body: JSON.stringify({
-			prompt:
-				`Modern, confident product film score, instrumental, 104 BPM, ${secs} seconds long. It starts at once, no slow intro: a warm analog synth arpeggio over a soft kick, with a clean lift at 4 s. ` +
+			prompt: CUT3
+				? `Modern, confident product film score, instrumental, 104 BPM, ${secs} seconds long. It starts at once, no slow intro: a warm analog synth arpeggio over a soft kick, with a clean lift at ${at('draw')}. ` +
+					`Steady, optimistic drive with crisp light percussion and a rising bass line. At ${at('soft')} it thins to a sparse, curious pulse with single felt-piano notes for a few seconds, then builds again. ` +
+					`A bigger lift at ${at('draft')}. At ${at('close')} it opens up into the final theme, then a calm, resolved ending with a soft final chord at ${secs - 2} s and silence after. ` +
+					'No vocals. Understated, premium, Nordic, not cheesy.'
+				: `Modern, confident product film score, instrumental, 104 BPM, ${secs} seconds long. It starts at once, no slow intro: a warm analog synth arpeggio over a soft kick, with a clean lift at 4 s. ` +
 				`At ${at('turn')} it drops to something tense and sparse: a low sustained note, a ticking pulse, single felt-piano notes, building slowly. ` +
 				`At ${at('lead', -3)} the tension resolves into a bright, warm lift with the full beat, crisp light percussion and a rising bass line. Steady, optimistic drive through the middle. ` +
 				`A bigger lift at ${at('next')}. At ${at('close')} it opens up into the final theme, then a calm, resolved ending with a soft final chord at ${secs - 2} s and silence after. ` +
@@ -170,7 +214,7 @@ if (A.includes('--music') && !fs.existsSync(mf)) {
 	fs.writeFileSync(mf, Buffer.from(await r.arrayBuffer()));
 	console.log(`music written (${secs} s)`);
 }
-if (fs.existsSync(mf)) music = `audio/music-${secs}.mp3`;
+if (fs.existsSync(mf)) music = `audio/${path.basename(mf)}`;
 else if (fs.existsSync(path.join(out, 'music.mp3'))) music = 'audio/music.mp3'; // the bed of the first cut: longer, and faded out at the end
-fs.writeFileSync(path.join(film, 'src/data/vo.json'), JSON.stringify({voice, music, lines}, null, 1) + '\n');
-console.log(`vo.json: ${lines.length} lines, ${lines.reduce((a, l) => a + l.dur, 0).toFixed(1)} s of voice, film ${total.toFixed(1)} s, music ${music}`);
+fs.writeFileSync(path.join(film, CUT3 ? 'src/data/vo3.json' : 'src/data/vo.json'), JSON.stringify({voice, music, lines}, null, 1) + '\n');
+console.log(`${CUT3 ? 'vo3' : 'vo'}.json: ${lines.length} lines, ${lines.reduce((a, l) => a + l.dur, 0).toFixed(1)} s of voice, film ${total.toFixed(1)} s, music ${music}`);

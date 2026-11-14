@@ -1,8 +1,10 @@
 # The demo film
 
-A 90 second film of Soft Yes, made from recordings of the live product. The current cut is
-`out/demo-2.mp4`; `out/screenshot.png` is its reveal frame (the walk folded into the ranked list).
-`out/demo-v1.mp4` is the first, two minute cut (a copy is at `../judging/demo.mp4`).
+Films of Soft Yes, made from recordings of the live product.
+
+- `out/demo-3.mp4` (69 s) is the current cut: Soft Yes inside Claude. How it is made: "The cut made inside Claude" below.
+- `out/demo-2.mp4` (87 s) shows the website; `out/screenshot.png` is its reveal frame (the walk folded into the ranked list).
+- `out/demo-v1.mp4` is the first, two minute cut (a copy is at `../judging/demo.mp4`).
 
 Everything on screen is the real product. Every number the voice says or a headline shows is read
 from the product when the shots are recorded, and the narration is rebuilt from those numbers.
@@ -34,6 +36,29 @@ again from the stored result.
 
 A quick look before a full render: `cd film && scripts/sheets.sh` writes one frame a second as 3x3
 sheets (about 15 seconds). `node scripts/reveal.mjs` prints the second of the reveal frame.
+
+## The cut made inside Claude
+
+`out/demo-3.mp4`: the question typed into claude.ai, the search drawing in the chat, the list, the soft
+yes, the ask written in the card. Its run output is under `/bulk3/runs/cala/film-claude/`.
+
+```sh
+export FILM_BULK=/bulk3/runs/cala/film-claude
+# 1. record the four shots in a signed-in Claude (cfind and cwalk each send one message; clist and cdraft reopen those chats)
+film/capture/quiet-net.sh run uv run -q --offline --with playwright python film/capture/claude_shots.py cfind clist cwalk cdraft
+# 2. voice, render, review
+cd film && hsec exec --only ELEVENLABS_API_KEY -- node scripts/make-vo.mjs --cut3 && ./render.sh 3 && scripts/review.sh out/demo-3.mp4
+```
+
+- The shots need a Claude session with the Soft Yes connector on and its tools on "Always allow".
+  `capture/claude_session.py` keeps the session in `/dev/shm`, never in the repo.
+- The shots hide the account's usage notice and keep Claude's own words under the card out of frame.
+- `src/scenes3.tsx` is the edit, `src/data/cap3.json` what the shots saw, `src/data/vo3.json` the spoken lines,
+  `src/data/timing3.json` the scene order.
+- A quick look without a full render: `COMP=Film3Silent scripts/sheets.sh`.
+- The music is the first cut's bed with seven bars taken out (`public/audio/music-c3-70.mp3`), so it ends at 70 s.
+- 14 Nov: the ElevenLabs credits ran out (they come back about 5 Dec). The cut is made from lines already
+  voiced. A changed line needs credits first.
 
 ## What is where
 

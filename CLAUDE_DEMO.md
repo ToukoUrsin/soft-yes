@@ -1,56 +1,68 @@
 # Soft Yes in Claude: the demo
 
-Checked 14.11 at 20:15 EET on claude.ai in Chrome, on your Claude account. The connector "Soft Yes" is added there and its tools are on "Always allow", so nothing asks for a tap.
+Checked 14.11 at 20:15 EET on claude.ai in Chrome, on your Claude account. Soft Yes is added there and set to "Always allow", so nothing asks for a click.
 
 ## Before you walk over
 
-1. Laptop, browser, https://claude.ai/new.
-2. Tap **+** under the message box, then Connectors. Soft Yes should be on.
+Laptop, https://claude.ai/new in Chrome (the Claude phone and desktop apps are not tested). Click **+** under the message box, then Connectors. Soft Yes should be on. If it is off, switch it on. Not listed: see the last section.
 
-## 1. Find investors (new, show this first)
+Open this file on the laptop too, so you can paste. Paste the two messages below once now, each in a new chat. At the table do the same, word for word: a changed wording takes one to three minutes.
 
-Type this:
+## 1. Find investors (show this first)
+
+Paste:
 
 > We're building in artificial intelligence in Europe and raising a pre-seed round. Use Soft Yes to find the investors who fit, and who Cala AI's investors could introduce us to.
 
-What appears, in about 25 s:
+Say while it draws:
 
-1. The card draws the search. First the question Cala is asked, in Cala's own query language. Then the companies it names (Bleu Robotics, INXM, Faircado, Tolemy Bio). Then the investors in them.
-2. A second source at the bottom left: **Cala AI's investors**, the 7 rounds Kfund, Lightspeed, Kibo and Masia sat in. Whoever led or joined those rounds has a way in.
-3. Each investor's own record is read one by one. The dots on the right are its signals: your field, leads rounds, pre-seed, active now, round size, near you, a way in.
-4. The numbers row: 294 facts from Cala, 24 investors' records with 120 rounds, 15 pages read, 0 facts from a language model.
-5. The list. **Ovni Capital** and **Contrarian Ventures** first: they led Bleu Robotics's €5M pre-seed this month, and the sentence from thesaasnews.com is right there. **Accel** has the way in: 3 rounds with Lightspeed. **Base10 Partners** led Causa Prima's seed with Kfund in the round.
+> "We ask your graph for companies like ours, then read their rounds and what you have on each investor. When your data says a fund led a round, we open the page you cite and check it. Nothing in the card comes from a language model."
 
-Say, while it draws: "This is your graph. You name the companies. Then we read each company, each round and each investor's own record, and count the signals. Every 'led' is checked against the page you cite."
+The card comes in about 25 s. Point at:
 
-Tap an investor to open it: each signal with its count, Cala's sources, and **Who it invests with**.
+1. The list. **Ovni Capital** and **Contrarian Ventures** led Bleu Robotics's €5M pre-seed this month. The sentence from thesaasnews.com is under it. **Accel** has a way in: 3 rounds with Lightspeed, a Cala AI investor. Click an investor to open it.
+2. The numbers: 294 facts from Cala, 15 pages read, 0 from a language model.
+3. The dots next to each investor: one for each thing its own record says (your field, leads rounds, pre-seed, active now, round size, near you, a way in). Few dots means Cala has little on that fund.
 
-Other things to type:
+If they read Claude's text under the card: that is Claude, only the card is checked.
 
-- `I'm starting an AI lab. Which pre-seed investors could Cala AI's investors introduce me to? Use Soft Yes.` (no place: Techstars, Northzone, Base10 Partners first)
-- `We build climate tech in the Nordics and raise a seed round. Tesi and Innovestor know us. Use Soft Yes to find investors.` (Lifeline Ventures first, it led Verda's Series A with Tesi in the round; then Greencode Ventures and Leitmotif)
+If they ask where it comes from:
 
-A search nobody has run before takes one to three minutes, because Cala's own answer is slow. The card says so and fills in by itself. The three above are stored and come back in seconds.
+- The question at the bottom of the card is in Cala's own query language.
+- The companies Cala names: Bleu Robotics, INXM, Faircado, Tolemy Bio.
+- **Cala AI's investors**, bottom left: the 7 rounds Kfund, Lightspeed, Kibo and Masia sat in.
 
 ## 2. Who could lead (the soft yes)
 
+Paste:
+
 > Tesi and Innovestor said they're in once we have a lead. Use Soft Yes to find who could lead our Series A.
 
-1. The walk draws in about 10 s. Tesi and Innovestor on the left, the rounds they joined in the middle, who led them on the right. A tick when the page Cala cites says the same. Wrong ones are struck through.
-2. The numbers row: 407 facts from Cala, 78 pages read, 47 "led" claims hold, 2 do not, 0 facts from a language model.
-3. Lead 1 is **Emergence Capital** (it led Verda's $189M Series B with Tesi in the round, and 4 Series A rounds in Cala). **Lifeline Ventures** is second, **NordicNinja VC** third. Next to each: "Tesi opens the door".
-4. Tap **Draft the ask to Tesi**. The ask opens in the card with two fields for your company and what you do.
+Say:
+
+> "Second example, a company further along. A soft yes is an investor who is in once someone leads. So we look at who led the rounds they joined, and check each 'led' against the page you cite."
+
+1. The card draws in about 10 s. Tesi and Innovestor on the left, the rounds they joined in the middle, who led them on the right. A tick means the page Cala cites says the same. Wrong ones are struck through.
+2. The numbers: 407 facts from Cala, 78 pages read, 47 "led" claims hold, 2 do not.
+3. Lead 1 is **Emergence Capital**: it led Verda's $189M Series B in September with Tesi in the round. **Lifeline Ventures** is second. Next to each: "Tesi opens the door".
+4. Click **Draft the ask to Tesi**. The ask opens in the card. Type `Tundra Power` (made up for the demo) as the company and `power electronics that cut energy losses in data centres` as what you do.
+
+If they ask why a Series B lead is first for a Series A: Emergence also led 4 Series A rounds in Cala, and it is the latest lead Tesi sat next to.
 
 ## Buttons in the card
 
-- **Draft the ask to Tesi**: the ask, every fact with its source. **Open in Gmail** puts it in a new Gmail message. **Copy** copies it.
-- **Who else opens this door**: the network. Tesi and Innovestor, 25 rounds, 95 other investors.
-- **Replay** runs the drawing again. **Expand** makes it full screen.
+- **Open in Gmail**, inside the ask: puts it in a new Gmail message.
+- **Who else opens this door**: the 95 other investors in Tesi and Innovestor's 25 rounds.
+- **Replay** draws it again. **Expand** makes it full screen.
 
 ## If they want more
 
+All of these answer in seconds:
+
 - `Who could lead Cala AI's next round? Use Soft Yes.` Their own company: 27 leads, Base10 Partners first.
-- `Who led Cala AI's rounds, by the page?` Each "led" Cala holds for Cala AI, next to the page's sentence.
+- `Who led Cala AI's rounds? Use Soft Yes to check each one against the page Cala cites.` Each "led" Cala holds for Cala AI, next to the page's sentence.
+- `I'm starting an AI lab. Which pre-seed investors could Cala AI's investors introduce me to? Use Soft Yes.` Techstars, Northzone, Base10 Partners first.
+- `We build climate tech in the Nordics and raise a seed round. Tesi and Innovestor know us. Use Soft Yes to find investors.` Lifeline Ventures first: it led Verda's Series A with Tesi in the round.
 
 ## Reset
 
@@ -58,18 +70,10 @@ Open a new chat. The same message draws the same card.
 
 ## If Claude lets you down
 
-https://soft-yes.fly.dev/chat is the same card in a plain stand-in chat. No login, no language model. Tap **Pre-seed investors for AI in Europe**.
+Text but no card means Soft Yes is off in that chat: + > Connectors > Soft Yes.
 
-## Does not work yet
+If Claude itself is down, https://soft-yes.fly.dev/chat shows the same card without Claude. No login. Click **Pre-seed investors for AI in Europe**.
 
-- **Claude adds its own words** under the card and reads your memory. The card is the checked part.
-- **A new search is slow** (one to three minutes). Run it once before you show it.
-- **Small funds have thin records** in Cala. An investor with one round shows few signals.
-- **Claude phone and desktop apps** are not tested. Use claude.ai in the browser.
-- **Text but no card** means the connector is off in that chat: + > Connectors > Soft Yes.
-
-## If the connector is missing
+## If Soft Yes is missing
 
 Customize > Connectors > Add custom connector. Name `Soft Yes`, address `https://soft-yes.fly.dev/mcp`, no sign-in. Add, then Connect.
-
-Screenshot of the real thing: `/bulk3/runs/cala/film-claude/test/find2.png`

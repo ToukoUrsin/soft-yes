@@ -1,7 +1,8 @@
 import React from 'react';
 import {AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame} from 'remotion';
-import {ORDER, type SceneId, type VoLine, timeline, vo} from './data';
+import {ORDER, type Cut, type SceneId, type VoLine, cut3, timeline, vo} from './data';
 import {SceneAsk, SceneAudit, SceneClose, SceneLead, SceneNext, SceneOpen, SceneTurn} from './scenes';
+import {SCENES3} from './scenes3';
 import {C, FPS, SANS, clamp} from './theme';
 import {Backdrop, Grain} from './ui';
 
@@ -16,8 +17,9 @@ const SCENES: Record<SceneId, React.FC> = {
 	close: SceneClose,
 };
 export const TOTAL = timeline().total;
-// every spoken line with its start, in film seconds
-const spoken = () => ORDER.flatMap((id) => timeline().scenes[id].cues.map((c) => ({line: c.line, at: timeline().scenes[id].from / FPS + c.s, scene: id})));
+export const TOTAL3 = cut3.timeline().total;
+// every spoken line of a cut with its start, in film seconds
+const spokenOf = (cut: Cut) => cut.ORDER.flatMap((id) => cut.timeline().scenes[id].cues.map((c) => ({line: c.line, at: cut.timeline().scenes[id].from / FPS + c.s, scene: id})));
 
 // Burned-in captions: the narration a few words at a time, on the word timing the voice came with.
 const chunks = (l: VoLine) => {
@@ -52,10 +54,10 @@ const chunks = (l: VoLine) => {
 	return out;
 };
 // lines that are already on screen as large type are not captioned a second time
-const typeset = (_scene: SceneId, text: string) => text.startsWith('Soft Yes. Turn');
-const Captions: React.FC = () => {
+const typeset = (_scene: string, text: string) => text.startsWith('Soft Yes. ');
+const Captions: React.FC<{cut: Cut}> = ({cut}) => {
 	const frame = useCurrentFrame();
-	for (const {line, at, scene} of spoken()) {
+	for (const {line, at, scene} of spokenOf(cut)) {
 		if (typeset(scene, line.text)) continue;
 		const cs = chunks(line);
 		for (let i = 0; i < cs.length; i++) {
@@ -76,22 +78,30 @@ const Captions: React.FC = () => {
 };
 
 // the music ducks under the voice
-const voiceOn = (f: number) => spoken().some((l) => f >= l.at * FPS - 7 && f <= (l.at + l.line.dur) * FPS + 7);
-const musicVol = (f: number) => {
-	const fade = interpolate(f, [0, 18], [0, 1], clamp) * interpolate(f, [TOTAL - 75, TOTAL - 3], [1, 0], clamp);
-	// eased over a few frames so the duck is not heard as a step
-	let v = 0;
-	for (let k = -4; k <= 4; k++) v += voiceOn(f + k) ? 0.12 : 0.3;
-	return fade * (v / 9);
+const musicVolOf = (cut: Cut) => {
+	const lines = spokenOf(cut);
+	const total = cut.timeline().total;
+	const voiceOn = (f: number) => lines.some((l) => f >= l.at * FPS - 7 && f <= (l.at + l.line.dur) * FPS + 7);
+	return (f: number) => {
+		const fade = interpolate(f, [0, 18], [0, 1], clamp) * interpolate(f, [total - 75, total - 3], [1, 0], clamp);
+		// eased over a few frames so the duck is not heard as a step
+		let v = 0;
+		for (let k = -4; k <= 4; k++) v += voiceOn(f + k) ? 0.12 : 0.3;
+		return fade * (v / 9);
+	};
 };
 
-export const Film: React.FC<{audio?: boolean; captions?: boolean}> = ({audio = true, captions = true}) => {
-	const tl = timeline();
+// A cut of the film: its scenes in order, each as long as its narration, with captions, voice and music.
+const makeFilm = (cut: Cut, scenes: Record<string, React.FC>): React.FC<{audio?: boolean; captions?: boolean}> => ({audio = true, captions = true}) => {
+	const tl = cut.timeline();
+	const {ORDER, vo} = cut;
+	const spoken = () => spokenOf(cut);
+	const musicVol = React.useMemo(() => musicVolOf(cut), []);
 	return (
 		<AbsoluteFill>
 			<Backdrop />
 			{ORDER.map((id) => {
-				const S = SCENES[id];
+				const S = scenes[id];
 				return (
 					<Sequence key={id} from={tl.scenes[id].from} durationInFrames={tl.scenes[id].dur} name={id}>
 						<S />
@@ -100,7 +110,7 @@ export const Film: React.FC<{audio?: boolean; captions?: boolean}> = ({audio = t
 			})}
 			<AbsoluteFill style={{pointerEvents: 'none', background: 'radial-gradient(ellipse at 50% 50%, transparent 66%, rgba(0,0,0,0.3) 100%)'}} />
 			<Grain />
-			{captions ? <Captions /> : null}
+			{captions ? <Captions cut={cut} /> : null}
 			{audio
 				? spoken().map((l, i) => (
 						<Sequence key={i} from={Math.round(l.at * FPS)} durationInFrames={Math.ceil(l.line.dur * FPS) + 6} name={`vo-${i}`}>
@@ -112,3 +122,6 @@ export const Film: React.FC<{audio?: boolean; captions?: boolean}> = ({audio = t
 		</AbsoluteFill>
 	);
 };
+export const Film = makeFilm({vo, ORDER, timeline} as unknown as Cut, SCENES);
+// the cut made inside Claude
+export const Film3 = makeFilm(cut3 as unknown as Cut, SCENES3);
