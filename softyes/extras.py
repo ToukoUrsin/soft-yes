@@ -339,7 +339,8 @@ ABOUT = re.compile(r"about|approach|thesis|criteria|strategy|what-we-do|how-we|p
 
 async def says(cala: Cala, lead: dict) -> dict:
     """What the fund says about itself on its own site, quoted verbatim, beside what Cala shows it did."""
-    key = "says:" + lead["id"]
+    uid = lead.get("id")
+    key = "says:" + (uid or lead["key"])
     hit = blob_get(key, max_age=3 * 86400)
     p = lead.get("pulse") or {}
     did = {"rounds": p.get("rounds"), "led": p.get("led"), "lead_rate": p.get("lead_rate"),
@@ -348,9 +349,9 @@ async def says(cala: Cala, lead: dict) -> dict:
     if hit:
         return {**hit, "did": did}
     try:
-        prof = await graph.profile(cala, lead["id"])
+        prof = await graph.profile(cala, uid) if uid else None
     except BudgetExceeded:
-        prof = await graph.profile(cala, lead["id"], cache_only=True)
+        prof = await graph.profile(cala, uid, cache_only=True)
     except CalaError:
         prof = None
     website = (prof or {}).get("website")

@@ -22,8 +22,8 @@ BASE = "https://api.cala.ai/v1"
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "cache.db"
 PER_MINUTE = int(os.environ.get("CALA_PER_MINUTE", "80"))
-CREDIT_CAP = int(os.environ.get("CALA_CREDIT_CAP", "1040"))  # fresh calls allowed since PLAN_START
-PLAN_START = float(os.environ.get("CALA_PLAN_START", "1794611220"))  # 2026-11-13T23:07Z, Explore plan bought
+CREDIT_CAP = int(os.environ.get("CALA_CREDIT_CAP", "2040"))  # fresh calls allowed since PLAN_START
+PLAN_START = float(os.environ.get("CALA_PLAN_START", "1794611220"))  # 2026-11-13T23:07Z, first credit pack
 
 
 class CalaError(RuntimeError):

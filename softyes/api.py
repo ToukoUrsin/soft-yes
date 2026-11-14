@@ -141,24 +141,53 @@ def _local_hits(q: str, limit: int) -> list[dict]:
     return out[:limit]
 
 
+def _investor_like(e: dict) -> bool:
+    return e["rounds"] > 0 or bool(graph.INVESTOR_WORDS.search(f"{e['name']} {e.get('description') or ''}"))
+
+
+def _families(hits: list[dict], limit: int, q: str = "") -> list[dict]:
+    """Cala often holds one firm as several entities (the manager and each fund vehicle). Offer them as one investor."""
+    out, done = [], set()
+    for e in hits:
+        if e["key"] in done:
+            continue
+        fam = graph.family(e["name"]) if e["type"] != "Person" and _investor_like(e) else None
+        members = [e]
+        if fam:
+            members += [o for o in INDEX.values() if o["key"] != e["key"] and o["type"] != "Person"
+                        and _investor_like(o) and "→" not in o["name"]
+                        and (graph.family(o["name"]) == fam or o["key"] == fam)]
+        members.sort(key=lambda m: (-m["rounds"], len(m["name"])))
+        done.update(m["key"] for m in members)
+        head = min(members, key=lambda m: (not graph.INVESTOR_WORDS.search(m["name"]), len(m["name"])))
+        ids = [i for m in members for i in m["ids"]][:6]
+        out.append({**head, "ids": ids, "rounds": sum(m["rounds"] for m in members),
+                    "description": head.get("description") or next((m["description"] for m in members if m.get("description")), None),
+                    "entities": [{"name": m["name"], "ids": m["ids"]} for m in members][:6]})
+    nq = graph.norm(q)
+    # the name as typed first, then the firm Cala knows best; a marketing agency called Seaya goes below Seaya Ventures
+    out.sort(key=lambda f: (not _investor_like(f), nq not in (f["key"], graph.root(f["name"])[0]),
+                            -(f["rounds"] + 3 * len(f["entities"])), len(f["name"])))
+    return out[:limit]
+
+
 @app.get("/api/suggest")
 async def suggest(q: str = "", limit: int = 7):
     q = q.strip()[:60]
     if len(q) < 2:
         return {"items": [], "source": "none"}
-    local = _local_hits(q, limit)
+    local = _local_hits(q, 20)
     source = "index"
     if len(q) >= 3 and not any(e["rounds"] for e in local):  # nothing with a track record locally: ask Cala
         try:
             found = await graph.search(cala_mod.get(), q, limit=8)
             for f in found:
                 _index_add(f["id"], f["raw_name"], f["type"], f["description"])
-            local = _local_hits(q, limit) or [INDEX[graph.norm(f["name"])] for f in found[:limit]
-                                              if graph.norm(f["name"]) in INDEX]
+            local = _local_hits(q, 20) or [INDEX[graph.norm(f["name"])] for f in found if graph.norm(f["name"]) in INDEX]
             source = "cala"
         except CalaError:
             source = "index"
-    return {"items": [{**e, "known_rounds": e["rounds"]} for e in local], "source": source}
+    return {"items": [{**e, "known_rounds": e["rounds"]} for e in _families(local, limit, q)], "source": source}
 
 
 @app.get("/api/company")
@@ -183,7 +212,7 @@ async def company(id: str):
 def _clean_inputs(body: dict) -> dict:
     softs = []
     for s in (body.get("soft_yeses") or [])[:6]:
-        ids = [i for i in (s.get("ids") or []) if isinstance(i, str) and len(i) == 36][:4]
+        ids = [i for i in (s.get("ids") or []) if isinstance(i, str) and len(i) == 36][:6]
         if ids and s.get("name"):
             softs.append({"name": str(s["name"])[:80], "ids": ids, "kind": s.get("kind", "fund")})
     if not softs:
@@ -192,7 +221,7 @@ def _clean_inputs(body: dict) -> dict:
     comp = body.get("company") if isinstance(body.get("company"), dict) else None
     if comp:
         comp = {"id": comp.get("id"), "name": str(comp.get("name", ""))[:80]}
-    return {"soft_yeses": softs, "stage": stage, "company": comp}
+    return {"soft_yeses": softs, "stage": stage, "company": comp, "deep": bool(body.get("deep"))}
 
 
 def _save_run(inputs: dict, result: dict) -> None:
@@ -219,8 +248,24 @@ def _annotate(result: dict) -> dict:
 
 
 async def _run(inputs: dict, emit) -> dict:
-    result = await walk_mod.walk(cala_mod.get(), inputs, emit,
-                                 aliases=lambda key: list(INDEX.get(key, {}).get("ids", [])))
+    """Two passes. The graph walk comes back in seconds and is shown at once. Investors with few rounds in
+    the graph are then read again through Cala's knowledge search, which takes about a minute."""
+    aliases = lambda key: list(INDEX.get(key, {}).get("ids", []))  # noqa: E731
+    result = await walk_mod.walk(cala_mod.get(), inputs, emit, aliases=aliases)
+    deep = {s["key"] for s in result["soft_yeses"]
+            if inputs.get("deep") or (s.get("followed") or 0) < walk_mod.DEEP_BELOW}
+    if deep:
+        result["credits"] = _credits()
+        _save_run(inputs, result)
+        await emit({"t": "partial", "run_id": result["run_id"], "result": _annotate(result),
+                    "reading": [s["name"] for s in result["soft_yeses"] if s["key"] in deep]})
+
+        async def quiet(event: dict) -> None:   # the second pass repeats the graph walk from cache: do not replay it
+            if event["t"] in ("knowledge", "captable", "note", "ledger") or \
+                    (event["t"] == "round" and event.get("via") in ("knowledge", "cap_table")):
+                await emit(event)
+
+        result = await walk_mod.walk(cala_mod.get(), inputs, quiet, aliases=aliases, deep=deep)
     result["credits"] = _credits()
     _save_run(inputs, result)
     _annotate(result)

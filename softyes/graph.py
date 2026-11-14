@@ -35,7 +35,8 @@ NOT_INVESTORS = {"cofounder", "founder", "founders", "undisclosed", "angel", "an
                  "others", "management", "employees", "ceo", "existinginvestors", "businessangels", "undisclosedinvestors"}
 
 LEGAL = {"oy", "oyj", "ab", "ltd", "limited", "llc", "llp", "lp", "inc", "gmbh", "as", "sa", "sas", "bv", "ky",
-         "plc", "corp", "co", "ag", "aps", "oü", "spa", "srl", "sl", "kg", "scsp", "fcre", "sgeic"}
+         "plc", "corp", "co", "ag", "aps", "oü", "spa", "srl", "sl", "kg", "scsp", "fcre", "sgeic", "ug", "sasu", "sarl"}
+TAIL = {"advisors", "advisers", "management", "services"}
 ACRONYMS = {"vc", "ai", "eit", "nato", "gtt", "mig", "eic", "iqm", "ab", "as", "llc", "lp", "llp", "usa", "uk",
             "eu", "bv", "ag", "sa", "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii"}
 PORTFOLIO_URL = re.compile(r"/(portfolio|companies|investments|our-companies|startups)/?($|\?|#)", re.I)
@@ -52,13 +53,53 @@ def norm(name: str) -> str:
     return "".join(words)
 
 
+FUND_WORDS = {"ventures", "venture", "capital", "partners", "vc", "fund", "funds", "investments", "investment", "invest",
+              "investissement", "management", "growth", "equity", "fcr", "scr", "fcre", "en", "liquidacion", "opportunity",
+              "opportunities", "seed", "early", "stage"}
+GENERIC_BASE = {"nordic", "nordics", "global", "first", "general", "alpine", "atlantic", "pacific", "north", "south", "east",
+                "west", "green", "black", "white", "digital", "alpha", "omega", "future", "european", "europe", "american",
+                "baltic", "index", "summit", "pioneer", "founders", "founder", "united", "national", "royal", "impact",
+                "international", "industrial", "innovation", "health", "climate", "energy", "smart", "world", "angel",
+                "blue", "next", "open", "life", "core", "peak", "tech", "data", "deep", "high", "gold", "star", "moon"}
+INVESTOR_WORDS = re.compile(r"\b(venture|ventures|capital|invest\w*|fund\w*|vc|private equity|accelerator|angel\w*|"
+                            r"family office|asset manage\w*)\b", re.I)
+
+
+def root(name: str) -> tuple[str, bool]:
+    """The part of a name before the first fund word, and whether a fund word followed it."""
+    words = re.findall(r"[a-z0-9åäöüéèñøæ]+", (name or "").lower())
+    base = []
+    for w in words:
+        if w in FUND_WORDS or w in LEGAL or re.fullmatch(r"[ivx]+|\d+", w):
+            break
+        base.append(w)
+    return "".join(base), len(base) < len(words)
+
+
+def family(name: str) -> str | None:
+    """'Seaya Ventures II, FCR' and 'Seaya Growth Tech' are vehicles of one firm: both give 'seaya'.
+
+    Returns None when the name has no distinctive root, so nothing is merged on a common word.
+    """
+    base, fund = root(name)
+    if len(base) < 4 or not fund or base in GENERIC_BASE:
+        return None
+    return base
+
+
 def pretty(name: str) -> str:
     """'NORDICNINJA VC LIMITED' -> 'Nordicninja VC', 'VNV Global AB (publ)' -> 'VNV Global'. Mixed case is kept."""
     name = re.sub(r"\s*\((publ|uk|us|usa|eu|de|fr|se|fi)\)", "", (name or "").strip(), flags=re.I)
+    name = re.sub(r"\s*\([^)]*\)\s*$", "", name) or name
     if not name:
         return name
     words = name.split()
     while len(words) > 1 and (re.sub(r"\W", "", words[-1]).lower() in LEGAL or not re.sub(r"\W", "", words[-1])):
+        words.pop()
+    # 'Lakestar Advisors', 'Ugly Duckling Ventures Management', 'HEADLINE SERVICES US': the firm, not its management company
+    if len(words) > 2 and words[-1].lower() in ("us", "uk") and words[-2].lower() in TAIL:
+        words.pop()
+    while len(words) > 1 and words[-1].lower() in TAIL:
         words.pop()
     if name.isupper() and not (len(words) == 1 and len(words[0]) <= 4):
         words = [w.upper() if w.lower() in ACRONYMS or (len(w) <= 3 and len(words) > 1 and w.isalpha() and n == 0)
