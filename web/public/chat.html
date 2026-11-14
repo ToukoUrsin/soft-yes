@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Soft Yes in a chat</title>
+<meta name="description" content="Soft Yes as a connector for your assistant: the walk through Cala's funding graph, drawn inside the chat.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+/* A stand-in chat: it hosts the same card an assistant draws when Soft Yes is added as a connector (MCP Apps).
+   No language model sits behind it. What is picked or typed goes straight to the connector at /mcp. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --ink: #141413; --ink2: #3d3d3a; --ink3: #73726c; --line: rgba(31, 30, 29, .15); --line2: rgba(31, 30, 29, .3);
+  --tint: rgba(31, 30, 29, .05); --tint2: rgba(31, 30, 29, .09); --inv: #ffffff;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+:root[data-theme="dark"] {
+  --bg: #1b1b1a; --ink: #faf9f5; --ink2: #c2c0b6; --ink3: #9c9a92; --line: rgba(222, 220, 209, .15); --line2: rgba(222, 220, 209, .3);
+  --tint: rgba(222, 220, 209, .06); --tint2: rgba(222, 220, 209, .11); --inv: #141413;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+button, input { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+
+.top { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; text-decoration: none; }
+.brand span { font-weight: 400; color: var(--ink3); }
+.top__r { display: flex; align-items: center; gap: 6px; }
+.ghost { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 550; border: 1px solid var(--line2); text-decoration: none; white-space: nowrap; }
+.ghost:hover { background: var(--tint); }
+.ghost--dark { background: var(--ink); color: var(--inv); border-color: var(--ink); }
+.ghost--dark:hover { background: var(--ink); opacity: .88; }
+
+.scroll { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+.chat { max-width: 792px; margin: 0 auto; padding: 28px 16px 24px; display: flex; flex-direction: column; gap: 18px; }
+.hello { padding: 9vh 0 2vh; display: grid; gap: 10px; }
+.hello h1 { margin: 0; font-size: 28px; line-height: 1.15; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; }
+.hello p { margin: 0; color: var(--ink2); max-width: 56ch; text-wrap: pretty; }
+.me { align-self: flex-end; max-width: min(82%, 560px); padding: 9px 14px; border-radius: 18px; background: var(--tint2); white-space: pre-wrap; overflow-wrap: anywhere; animation: in .25s ease; }
+.it { max-width: 68ch; color: var(--ink); text-wrap: pretty; animation: in .3s ease; }
+.it.dim { color: var(--ink3); font-size: 13.5px; }
+.use { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; font-size: 13px; color: var(--ink3); animation: in .25s ease; }
+.use code { font: 12px var(--mono); color: var(--ink2); }
+.use i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--ink3); border-top-color: transparent; animation: spin .7s linear infinite; }
+.use.is-done i { animation: none; border: 0; background: var(--ink3); width: 5px; height: 5px; margin: 0 1px; }
+.cardwrap { animation: in .3s ease; }
+.cardwrap iframe { display: block; width: 100%; height: 320px; border: 0; background: transparent; color-scheme: normal; transition: height .25s cubic-bezier(.2, .8, .2, 1); }
+.cardwrap.is-full { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; animation: none; }
+.cardwrap.is-full iframe { flex: 1 1 auto; height: auto; transition: none; }
+.cardwrap .close { display: none; }
+.cardwrap.is-full .close { display: flex; align-items: center; justify-content: space-between; flex: none; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; }
+.cardwrap.is-full .close button { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line2); font-weight: 550; }
+@keyframes in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.dock { flex: none; padding: 8px max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+.dock__in { max-width: 760px; margin: 0 auto; display: grid; gap: 8px; }
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; height: 34px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line2); font-size: 13.5px; white-space: nowrap; transition: background .15s; }
+.chip:hover { background: var(--tint); }
+.chip:disabled { opacity: .45; cursor: default; }
+.box { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 8px 0 16px; border-radius: 16px; border: 1px solid var(--line2); background: var(--bg); transition: border-color .15s, box-shadow .15s; }
+.box:focus-within { border-color: var(--ink3); box-shadow: 0 0 0 3px var(--tint); }
+.box input { flex: 1 1 auto; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: 16px; }
+.box input::placeholder { color: var(--ink3); }
+.box button { flex: none; width: 36px; height: 36px; border-radius: 10px; background: var(--ink); color: var(--inv); display: grid; place-items: center; transition: opacity .15s; }
+.box button:disabled { opacity: .3; cursor: default; }
+.fine { margin: 0; text-align: center; font-size: 12px; color: var(--ink3); text-wrap: balance; }
+.fine a { text-underline-offset: 3px; }
+
+.sheet { position: fixed; inset: 0; z-index: 30; display: none; align-items: flex-end; justify-content: center; background: rgba(0, 0, 0, .35); }
+.sheet.is-open { display: flex; }
+.sheet__in { width: min(520px, 100%); margin: 16px; padding: 20px; border-radius: 16px; background: var(--bg); border: 1px solid var(--line); display: grid; gap: 12px; animation: in .25s ease; }
+.sheet h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.sheet p { margin: 0; color: var(--ink2); font-size: 14px; }
+.sheet ol { margin: 0; padding-left: 18px; color: var(--ink2); font-size: 14px; display: grid; gap: 4px; }
+.url { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 44px; border-radius: 10px; border: 1px solid var(--line2); }
+.url code { flex: 1 1 auto; min-width: 0; font: 13px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.url button { flex: none; height: 32px; padding: 0 12px; border-radius: 8px; background: var(--ink); color: var(--inv); font-size: 13px; font-weight: 550; }
+.sheet__x { justify-self: end; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line2); font-size: 13px; font-weight: 550; }
+@media (min-width: 600px) { .sheet { align-items: center; } }
+@media (max-width: 520px) {
+  .hello h1 { font-size: 24px; }
+  .chat { padding-top: 18px; }
+  .brand span { display: none; }
+  .me { max-width: 88%; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+body.bare .top, body.bare .dock, body.bare .hello { display: none; }
+body.bare .chat { padding: 12px 16px; }
+html:has(body.bare), body.bare { height: auto; display: block; }
+body.bare .scroll { overflow: visible; }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/" aria-label="Soft Yes, home">
+    <svg width="16" height="16" viewBox="0 0 14 14" aria-hidden="true"><circle cx="4" cy="7" r="2.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="7" r="2.6" fill="currentColor"/></svg>
+    Soft Yes <span>in a chat</span>
+  </a>
+  <div class="top__r">
+    <a class="ghost" href="/">The site</a>
+    <button class="ghost ghost--dark" id="add" type="button">Add to your assistant</button>
+  </div>
+</header>
+<div class="scroll" id="scroll">
+  <main class="chat" id="chat">
+    <section class="hello" id="hello">
+      <h1>They said yes, if you find a lead. Ask in your own chat.</h1>
+      <p>Soft Yes is a connector for your assistant. It walks Cala’s funding graph from the investors who said yes, checks every “led” against the page Cala cites, and draws it in the chat. Pick a question to see the card.</p>
+    </section>
+  </main>
+</div>
+<div class="dock">
+  <div class="dock__in">
+    <div class="chips" id="chips"></div>
+    <form class="box" id="form" autocomplete="off">
+      <input id="input" type="text" placeholder="Your company, or the investors who said yes" aria-label="Your company, or the investors who said yes" enterkeyhint="send">
+      <button type="submit" id="send" aria-label="Send" disabled>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>
+      </button>
+    </form>
+    <p class="fine">A stand-in chat with no language model behind it. What you send goes straight to Soft Yes, and every fact in the card is Cala’s.</p>
+  </div>
+</div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-h">
+  <div class="sheet__in">
+    <h2 id="sheet-h">Add Soft Yes to your assistant</h2>
+    <p>It works in any assistant that takes a custom connector (MCP). With your mail connected too, it finds the soft yeses itself and saves the ask as a draft.</p>
+    <div class="url"><code id="url"></code><button type="button" id="copy">Copy</button></div>
+    <ol>
+      <li>Open your assistant’s connector settings and add a custom connector.</li>
+      <li>Paste the address above. No sign-in.</li>
+      <li>Ask: “Who said they’re in once we have a lead? Find who could lead.”</li>
+    </ol>
+    <button type="button" class="sheet__x" id="sheet-x">Close</button>
+  </div>
+</div>
+<script>
+(() => {
+  const Q = new URLSearchParams(location.search)
+  const $ = (id) => document.getElementById(id)
+  const chat = $('chat'), scroller = $('scroll'), chips = $('chips'), input = $('input'), sendBtn = $('send')
+  const dark = matchMedia('(prefers-color-scheme: dark)')
+  const theme = () => Q.get('theme') || (dark.matches ? 'dark' : 'light')
+  document.documentElement.dataset.theme = theme()
+  if (Q.get('bare')) document.body.classList.add('bare')
+  $('url').textContent = location.origin + '/mcp'
+
+  let rid = 1
+  async function rpc(method, params) {
+    const r = await fetch('/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: rid++, method, params }) })
+    const j = await r.json()
+    if (j.error) throw new Error(j.error.message || 'Soft Yes did not answer')
+    return j.result
+  }
+  const app = rpc('resources/read', { uri: 'ui://soft-yes/app.html' }).then((r) => r.contents[0].text)
+
+  const cards = new Map()
+  const state = { run: null, company: null, lead: null, door: null, tracker: null, busy: false, top: null }
+
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
+  const down = () => requestAnimationFrame(() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' }))
+  const me = (text) => { $('hello')?.remove(); chat.append(el('div', 'me', text)); down() }
+  const it = (text, dim) => { chat.append(el('p', 'it' + (dim ? ' dim' : ''), text)); down() }
+
+  function ctx(card) {
+    const full = card.mode === 'fullscreen'
+    const maxh = +Q.get('maxh') || undefined
+    return {
+      theme: theme(), displayMode: card.mode, availableDisplayModes: ['inline', 'fullscreen'], platform: innerWidth < 600 ? 'mobile' : 'web',
+      containerDimensions: full ? { width: card.frame.clientWidth, height: card.frame.clientHeight } : { width: card.frame.clientWidth, maxHeight: maxh },
+      safeAreaInsets: { top: 0, right: 0, bottom: 0, left: 0 }, toolInfo: { tool: { name: card.tool } }, locale: navigator.language,
+    }
+  }
+  const post = (card, msg) => card.frame.contentWindow?.postMessage({ jsonrpc: '2.0', ...msg }, '*')
+
+  async function addCard(tool, args) {
+    const html = await app
+    const wrap = el('div', 'cardwrap')
+    const bar = el('div', 'close')
+    bar.append(el('span', '', 'Soft Yes'))
+    const x = el('button', '', 'Close'); x.type = 'button'
+    bar.append(x)
+    const frame = document.createElement('iframe')
+    frame.title = 'Soft Yes'
+    frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox')
+    frame.setAttribute('allow', 'clipboard-write')
+    frame.srcdoc = html
+    wrap.append(bar, frame)
+    chat.append(wrap)
+    const card = { frame, wrap, tool, args, mode: 'inline', ready: false, result: null }
+    x.onclick = () => setMode(card, 'inline')
+    cards.set(frame.contentWindow, card)
+    card.done = rpc('tools/call', { name: tool, arguments: args })
+      .catch((e) => ({ isError: true, content: [{ type: 'text', text: e.message }] }))
+      .then((r) => { if (Q.get('hold')) return new Promise(() => {}); card.result = r; if (card.ready) post(card, { method: 'ui/notifications/tool-result', params: r }); return r })
+    down()
+    return card
+  }
+
+  function setMode(card, mode) {
+    card.mode = mode === 'fullscreen' ? 'fullscreen' : 'inline'
+    card.wrap.classList.toggle('is-full', card.mode === 'fullscreen')
+    if (card.mode === 'fullscreen') card.frame.style.height = ''
+    requestAnimationFrame(() => post(card, { method: 'ui/notifications/host-context-changed', params: { displayMode: card.mode, containerDimensions: ctx(card).containerDimensions } }))
+  }
+
+  addEventListener('message', async (ev) => {
+    const card = cards.get(ev.source)
+    const m = ev.data
+    if (!card || !m || m.jsonrpc !== '2.0' || !m.method) return
+    const reply = (result) => m.id !== undefined && ev.source.postMessage({ jsonrpc: '2.0', id: m.id, result }, '*')
+    switch (m.method) {
+      case 'ui/initialize':
+        return reply({ protocolVersion: '2026-01-26', hostInfo: { name: 'soft-yes-stand-in-chat', version: '1.0.0' },
+          hostCapabilities: { openLinks: {}, serverTools: {}, message: {}, updateModelContext: {} }, hostContext: ctx(card) })
+      case 'ui/notifications/initialized':
+        card.ready = true
+        post(card, { method: 'ui/notifications/tool-input', params: { arguments: card.args } })
+        if (card.result) post(card, { method: 'ui/notifications/tool-result', params: card.result })
+        return
+      case 'ui/notifications/size-changed':
+        if (card.mode === 'inline' && m.params?.height) {
+          const near = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140
+          card.frame.style.height = Math.ceil(m.params.height) + 'px'
+          if (near && card === state.top) down()
+        }
+        return
+      case 'tools/call':
+        try { return reply(await rpc('tools/call', m.params)) } catch (e) {
+          return ev.source.postMessage({ jsonrpc: '2.0', id: m.id, error: { code: -32000, message: e.message } }, '*')
+        }
+      case 'ui/message': {
+        reply({})
+        const text = (m.params?.content || []).map((c) => c.text || '').join('\n').trim()
+        if (text) { me(text.length > 240 ? text.slice(0, 240).trimEnd() + '…' : text); act(text) }
+        return
+      }
+      case 'ui/open-link':
+        try { window.open(m.params.url, '_blank', 'noopener') } catch { /* blocked */ }
+        return reply({})
+      case 'ui/request-display-mode':
+        setMode(card, m.params?.mode)
+        return reply({ mode: card.mode })
+      default:
+        return reply({})
+    }
+  })
+  dark.addEventListener('change', () => {
+    document.documentElement.dataset.theme = theme()
+    for (const c of cards.values()) post(c, { method: 'ui/notifications/host-context-changed', params: { theme: theme() } })
+  })
+
+  const WORD = { find_lead: 'Walking Cala’s graph', explore_network: 'Reading the network from Cala', draft_intro: 'Writing the ask from checked facts', round_tracker: 'Opening the round', check_claim: 'Reading the page Cala cites' }
+
+  async function step(tool, args) {
+    state.busy = true
+    setChips([])
+    const use = el('div', 'use')
+    use.append(el('i'), el('span', '', WORD[tool] || 'Soft Yes'), el('code', '', tool))
+    chat.append(use)
+    const card = await addCard(tool, args)
+    state.top = card
+    const r = await card.done
+    use.classList.add('is-done')
+    state.busy = false
+    const sc = r.structuredContent
+    if (r.isError || !sc) { setChips(START); return null }
+    if (sc.view === 'walk') {
+      Object.assign(state, { run: sc.run_id, company: sc.company || null, lead: sc.leads[0]?.name || null, door: sc.leads[0]?.door?.name || null })
+      it(sc.headline)
+    } else if (sc.view === 'network') {
+      it('Each line is a round in Cala’s graph. Pick an investor to see which of yours opens that door.')
+    } else if (sc.view === 'draft') {
+      Object.assign(state, { lead: sc.lead.name, door: sc.to.fund || state.door })
+      it('Every name and number in it is in the facts under it. You send it, not Soft Yes.')
+    } else if (sc.view === 'tracker') {
+      state.tracker = sc.tracker
+    } else if (sc.view === 'claim') {
+      it(sc.rounds.length ? `${sc.confirmed} of Cala’s “led” claims for ${sc.company} hold on the cited page${sc.corrected ? `, ${sc.corrected} ${sc.corrected === 1 ? 'does' : 'do'} not` : ''}.` : `Cala’s graph holds no round for ${sc.company}.`)
+    }
+    setChips(next(sc))
+    return sc
+  }
+
+  // What an assistant would do with the sentence, done by rule: this chat has no model.
+  async function act(text) {
+    if (state.busy) return
+    let m
+    if ((m = /^Draft the intro ask to (.+?) about (.+?) with Soft Yes \(run (\w+)\)/.exec(text))) {
+      state.door = m[1]
+      return step('draft_intro', { run_id: m[3], lead: m[2], kind: 'intro_ask', company: state.company || undefined })
+    }
+    if ((m = /^Draft (?:the intro ask about|a note to) (.+?) with Soft Yes \(run (\w+)\)/.exec(text))) {
+      return step('draft_intro', { run_id: m[2], lead: m[1], kind: /^Draft a note/.test(text) ? 'direct' : 'intro_ask', company: state.company || undefined })
+    }
+    if (/^Save (this|that) as a draft/i.test(text)) {
+      it('In your own assistant this lands in your mail drafts, unsent. This chat has no mailbox, so it only marks the lead as asked.', true)
+      return step('round_tracker', { run_id: state.run, tracker: state.tracker || undefined, updates: state.lead ? [{ investor: state.lead, status: 'asked', via: state.door || undefined }] : [] })
+    }
+    if (state.run && /network|know|co-?invest|door|one hop/i.test(text)) {
+      m = /(?:to|from|reach|introduce me to)\s+([A-Z][\w&.\- ]+?)\??$/.exec(text)
+      return step('explore_network', m ? { run_id: state.run, target: m[1].trim() } : { run_id: state.run })
+    }
+    if (state.run && /stand|track|round so far/i.test(text)) return step('round_tracker', { run_id: state.run, tracker: state.tracker || undefined })
+    if ((m = /who led (.+?)(?:[’']s\b.*|\?|$)/i.exec(text))) return step('check_claim', { company: m[1].trim() })
+    const names = text.replace(/\s+said yes.*$/i, '').split(/\s*,\s*|\s+and\s+|\s*\+\s*/).map((s) => s.trim()).filter(Boolean)
+    if (names.length > 1) return step('find_lead', { investors: names.slice(0, 6) })
+    const co = await step('find_lead', { company: text.trim() })
+    if (!co) it(`Cala’s graph has no company it is sure is “${text.trim()}”. Name the investors who said yes instead, separated by commas.`, true)
+  }
+
+  const START = [
+    { label: 'Who could lead Cala AI’s next round?', say: 'My company is Cala AI. Who could lead our next round?', run: () => step('find_lead', { company: 'Cala AI' }) },
+    { label: 'Tesi and Innovestor said yes', say: 'Tesi and Innovestor said they’re in once we have a lead. Who could lead our Series A?', run: () => step('find_lead', { investors: ['Tesi', 'Innovestor'], stage: 'SERIES_A' }) },
+    { label: 'Who led Cala AI’s rounds, by the page?', say: 'Who led Cala AI’s rounds? Check it against the page.', run: () => step('check_claim', { company: 'Cala AI' }) },
+  ]
+  function next(sc) {
+    const out = []
+    if (!state.run) return START
+    if (sc.view !== 'network') out.push({ label: 'Who do my investors know?', say: 'Who do my investors know? Show me the network.', run: () => step('explore_network', { run_id: state.run }) })
+    if (sc.view === 'walk' && state.lead) out.push({ label: `Draft the ask about ${state.lead}`, say: `Draft the intro ask${state.door ? ` to ${state.door}` : ''} about ${state.lead}.`, run: () => step('draft_intro', { run_id: state.run, lead: state.lead, kind: 'intro_ask', company: state.company || undefined }) })
+    if (sc.view !== 'tracker') out.push({ label: 'Where does the round stand?', say: 'Where does the round stand?', run: () => step('round_tracker', { run_id: state.run, tracker: state.tracker || undefined }) })
+    if (sc.view === 'walk' && sc.leads[0]?.evidence?.[0]?.company) {
+      const e = sc.leads[0].evidence[0]
+      out.push({ label: `Did ${sc.leads[0].name} really lead ${e.company}?`, say: `Did ${sc.leads[0].name} really lead ${e.company}’s round? Check the page.`, run: () => step('check_claim', { company: e.company, investor: sc.leads[0].name }) })
+    }
+    out.push({ label: 'Start over', say: null, run: () => location.assign(location.pathname) })
+    return out
+  }
+  function setChips(list) {
+    chips.replaceChildren(...list.map((c) => {
+      const b = el('button', 'chip', c.label)
+      b.type = 'button'
+      b.onclick = () => { if (state.busy) return; if (c.say) me(c.say); c.run() }
+      return b
+    }))
+  }
+
+  $('form').addEventListener('submit', (e) => {
+    e.preventDefault()
+    const text = input.value.trim()
+    if (!text || state.busy) return
+    input.value = ''
+    sendBtn.disabled = true
+    me(text)
+    act(text)
+  })
+  input.addEventListener('input', () => { sendBtn.disabled = !input.value.trim() })
+  const sheet = $('sheet')
+  $('add').onclick = () => sheet.classList.add('is-open')
+  $('sheet-x').onclick = () => sheet.classList.remove('is-open')
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.classList.remove('is-open') })
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') { sheet.classList.remove('is-open'); for (const c of cards.values()) if (c.mode === 'fullscreen') setMode(c, 'inline') } })
+  $('copy').onclick = async () => { try { await navigator.clipboard.writeText($('url').textContent); $('copy').textContent = 'Copied' } catch { $('copy').textContent = 'Select and copy' } }
+
+  // For checks: ?tool=find_lead&args={...} draws one card and nothing else.
+  if (Q.get('tool')) {
+    $('hello')?.remove()
+    let args = {}
+    try { args = JSON.parse(Q.get('args') || '{}') } catch { /* drawn with no arguments */ }
+    step(Q.get('tool'), args)
+  } else {
+    setChips(START)
+  }
+})()
+</script>
+</body>
+</html>

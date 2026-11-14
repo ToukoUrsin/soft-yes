@@ -377,6 +377,24 @@ def _fact_sources(lead_srcs: list[dict], rd: dict, when: str | None, limit: int)
     return (out + [x for x in ranked if x not in out])[:limit]
 
 
+def _net(rounds: dict[str, dict], joined: dict, backed: dict, softs: list[dict]) -> list[dict]:
+    """Each walked round as a row of names: [name, led by Cala's flag, what the cited page said]."""
+    def row(rd: dict, who: list[str], led: bool = False) -> dict:
+        return {"id": rd["id"], "company": (rd.get("issuer") or {}).get("name"), "stage_name": rd.get("stage_name"),
+                "date": rd.get("date"), "via": rd.get("via", "graph"), "soft": who, "soft_led": led,
+                "investors": [[i["name"], 1 if i["is_lead"] else 0, (i.get("check") or {}).get("status")]
+                              for i in rd["investors"] if not _no_name(i["name"])][:24]}
+
+    out = [row(rd, sorted(joined[rid] | backed[rid])) for rid, rd in rounds.items()]
+    seen = {r["id"] for r in out}
+    for s in softs:   # the rounds a soft-yes investor led itself: the people it brought in
+        for rd, _ in s.get("_own", []):
+            if rd["id"] not in seen:
+                seen.add(rd["id"])
+                out.append(row(rd, [s["key"]], True))
+    return sorted(out, key=lambda r: r["date"] or "", reverse=True)[:240]
+
+
 def _round_brief(rd: dict) -> dict:
     out = {"id": rd["id"], "issuer": rd["issuer"], "stage": rd["stage"], "stage_name": rd["stage_name"],
            "date": rd["date"], "amount": rd["amount"], "currency": rd["currency"]}
@@ -1508,6 +1526,8 @@ async def walk(cala: Cala, inputs: dict, emit: Emit, aliases: Callable[[str], li
                        "confirmed_rows": [f for f in findings if f["kind"] == "confirmed"][:400], "claims": claims},
         "ledger": ledger.as_dict() | {"facts": facts, "sources": len(urls), "seconds": round(time.time() - t0, 1),
                                       "llm_facts": 0},
+        # every round opened on the walk with everyone Cala lists in it: who the soft-yes investors have sat next to
+        "net": _net(rounds, joined, backed, softs),
         "notes": notes,
     }
     await tick()

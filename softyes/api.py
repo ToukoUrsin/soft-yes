@@ -937,8 +937,26 @@ def _load_annotated(run_id: str) -> dict | None:
     return _annotate(result) if result else None
 
 
+async def _mcp_company(name: str) -> dict | None:
+    """The founder's company as the assistant names it: only a name Cala holds as typed, never a guess."""
+    items = (await companies(name, 4))["items"]
+    if not items or not items[0].get("sure"):
+        return None
+    d = await _company(items[0]["ids"])
+    if not d:
+        return None
+    return {"name": d["name"], "ref": {"id": d["id"], "ids": d["ids"], "name": d["name"]}, "inputs": _company_inputs(d)}
+
+
+async def _mcp_holdout(run_id: str) -> dict | None:
+    try:
+        return await _holdout(run_id)
+    except HTTPException:
+        return None
+
+
 MCP = mcp_mod.Server(suggest=lambda name: suggest(name), run=lambda inputs, emit: _run(inputs, emit), load=_load_annotated,
-                     check=lambda name: _check(q=name))
+                     check=lambda name: _check(q=name), company=_mcp_company, holdout=_mcp_holdout)
 
 
 @app.post("/mcp")
@@ -992,7 +1010,9 @@ async def audit():
             "confirmed_rows": [f for f in rows if f["kind"] == "confirmed"
                                and claims.get((f["round"], graph.norm(f["cala"]))) == "lead"],
             "amounts": [f for f in rows if f["kind"] == "amount"][:80],
-            "stages": [f for f in rows if f["kind"] == "stage"][:80]}
+            "stages": [f for f in rows if f["kind"] == "stage"][:80],
+            # corrections someone sent from a card in their own assistant, after reading the sentence
+            "flags": ((extras.blob_get("flags") or {}).get("rows") or [])[-100:]}
 
 
 @app.get("/api/backtest")
@@ -1086,6 +1106,15 @@ async def health():
 @app.exception_handler(CalaError)
 async def cala_error(_, exc: CalaError):
     return JSONResponse({"detail": str(exc)}, status_code=503 if isinstance(exc, BudgetExceeded) else 502)
+
+
+@app.get("/chat")
+async def chat_page():
+    """The card an assistant draws for the connector, hosted in a stand-in chat so it can be seen without adding it."""
+    for f in (DIST.parent / "public" / "chat.html", DIST / "chat.html"):
+        if f.is_file():
+            return FileResponse(f, headers={"Cache-Control": "no-cache"})
+    raise HTTPException(404)
 
 
 @app.get("/{path:path}")
