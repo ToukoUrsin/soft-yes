@@ -7,6 +7,12 @@ import { Btn, Head, Icon, Ledger, Link, Quote, Src } from './ui'
 
 // ---------------------------------------------------------------------------------------------- the ask
 
+/** The round as a founder writes it: "a seed round", "a Series A". */
+export function raisingOf(stage?: string | null): string | null {
+  if (!stage) return null
+  return /^series/i.test(stage) ? `a ${stage}` : `a ${stage.toLowerCase()} round`
+}
+
 /** Has the connector write the ask from the run's checked facts; null when the chat does not let a card call tools. */
 export async function writeAsk(args: { run_id: string; lead: string; kind?: string; company?: string | null; raising?: string | null }): Promise<DraftData | null> {
   try {
@@ -139,7 +145,7 @@ export function Tracker({ data }: { data: TrackerData }) {
   }
   const draft = async (name: string, via?: string | null) => {
     setBusy(name)
-    const got = await writeAsk({ run_id: d.run_id, lead: name, company: d.company, raising: d.stage_name })
+    const got = await writeAsk({ run_id: d.run_id, lead: name, company: d.company, raising: raisingOf(d.stage_name) })
     if (got) {
       setAsks((a) => ({ ...a, [name]: got }))
       setBusy(null)

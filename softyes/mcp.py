@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import re
 import secrets
 import time
 from typing import Awaitable, Callable
@@ -19,6 +20,13 @@ from . import chat, extras, graph, walk
 PUBLIC_URL = os.environ.get("SOFTYES_PUBLIC_URL", "https://soft-yes.fly.dev").rstrip("/")
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 STAGES = ["PRE_SEED", "SEED", "SERIES_A", "SERIES_B", "SERIES_C"]
+
+
+def _stage_code(v) -> str | None:
+    """'Series A', 'series-a' and 'SERIES_A' are one stage to the person asking."""
+    code = re.sub(r"[^A-Z]+", "_", str(v or "").upper()).strip("_")
+    code = {"PRESEED": "PRE_SEED", "A": "SERIES_A", "B": "SERIES_B", "C": "SERIES_C"}.get(code, code)
+    return code if code in STAGES else None
 FIRST_ANSWER_S = 45   # an assistant should not wait longer than this; the rest is on the run's page
 STORED_FOR_S = 6 * 3600   # a walk stored this recently is given as it is; the cards open at once
 
@@ -397,7 +405,7 @@ class Server:
     async def _inputs(self, args: dict) -> tuple[dict | None, dict, list[str], str | None]:
         """What to walk from: the investors given, or the ones Cala lists in the company. Also the mail behind each."""
         names, mail = _names(args)
-        stage = args.get("stage") if args.get("stage") in STAGES else None
+        stage = _stage_code(args.get("stage"))
         comp = None
         if str(args.get("company") or "").strip() and self.company:
             comp = await self.company(str(args["company"]).strip()[:80])

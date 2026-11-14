@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { say, tell } from './bridge'
-import { DraftBody, writeAsk } from './cards'
+import { DraftBody, raisingOf, writeAsk } from './cards'
 import { type DraftData, type Fix, type Lead, type Round, type Soft, type WalkData, listAnd, month, num, ok, plural, reduced, roundName, wrong } from './lib'
 import { Btn, Count, Head, Icon, Ledger, Link, Quote, Src, useWidth } from './ui'
 
@@ -383,7 +383,7 @@ export function Walk({ data: d, roomy, fit, canExpand, onExpand, onNetwork }: {
   const names = d.softs.map((s) => s.name)
   const draft = async (l: Lead) => {
     setBusy(l.key)
-    const got = await writeAsk({ run_id: d.run_id, lead: l.name, kind: l.door ? 'intro_ask' : 'direct', company: d.company, raising: d.stage_name })
+    const got = await writeAsk({ run_id: d.run_id, lead: l.name, kind: l.door ? 'intro_ask' : 'direct', company: d.company, raising: raisingOf(d.stage_name) })
     if (got) {
       setAsks((a) => ({ ...a, [l.key]: got }))
       setBusy(null)

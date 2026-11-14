@@ -272,6 +272,12 @@ def template(result: dict, lead: dict, kind: str, founder: dict) -> dict:
     return {"subject": subject, "body": body}
 
 
+INVENTED = re.compile(r"\b(meeting with us|met with us|when we (?:spoke|met|talked)|since we (?:spoke|met|talked)|"
+                      r"our (?:call|meeting|conversation|chat|discussion)|(?:last|earlier this) (?:week|month)|the other day|"
+                      r"yesterday|(?:good|great|perfect|strong|natural) fit|we (?:think|believe|feel)|"
+                      r"thank you for (?:meeting|your time|taking the time|speaking))\b", re.I)
+
+
 def verify_draft(text: str, facts: list[str], founder: dict) -> list[str]:
     """Every number and every proper noun in the draft must come from the fact sheet or the founder's own words."""
     allowed = " ".join(facts + [str(v) for v in founder.values()]).lower()
@@ -335,7 +341,9 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
               "When FACTS say an investor 'is listed as an investor in that round, but the announcement does not name' it, "
               "write, to that investor, 'a round you are listed in as an investor'; never write that it took part, joined, or was "
               "alongside. Write 'co-led' wherever FACTS say co-led. "
-              "Never add a name, number, date, title, sector or claim that is not in FACTS. No flattery, no buzzwords, "
+              "Never add a name, number, date, title, sector or claim that is not in FACTS. FACTS say what an investor told "
+              "us, not how or when: never write that you met, spoke, called or had a meeting, never thank them for one, and "
+              "give no opinion on fit. No flattery, no buzzwords, "
               "no exclamation marks, no em dashes, no repeated phrases. Sound like a founder writing to someone they have "
               "met: direct and warm. First person plural for the company. Only three things may be a bracketed placeholder "
               "when FACTS lack them: [your company], [what you do], [your round]. Any other missing detail is left out. "
@@ -346,7 +354,8 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
     # The same facts and the same words from the founder get the same message: a reload does not reword it or wait again.
     memo = "draft:" + hashlib.sha1("\x1f".join((kind, GEMINI_MODEL, system, user)).encode()).hexdigest()
     kept = blob_get(memo)
-    if kept and not verify_draft(re.sub(r"\[[^\]]*\]", " ", kept["subject"] + "\n" + kept["body"]), facts, founder):
+    if kept and not INVENTED.search(kept["body"]) and \
+            not verify_draft(re.sub(r"\[[^\]]*\]", " ", kept["subject"] + "\n" + kept["body"]), facts, founder):
         was = kept.get("dropped") or []
         return _finish(kind, kept["subject"], kept["body"], result, lead, founder, model=GEMINI_MODEL, fallback=False, rejected=was,
                        note="Written by Gemini. Every name and number in it is in Cala's facts or in your own words below."
@@ -362,6 +371,8 @@ async def draft(result: dict, lead: dict, kind: str, founder: dict, llm: bool = 
             unsupported = ["(over 300 characters)"]
             continue
         unsupported = verify_draft(re.sub(r"\[[^\]]*\]", " ", subject + "\n" + body), facts, founder)
+        if not unsupported:   # a meeting, a call or an opinion is a claim too, and no fact carries one
+            unsupported = list(dict.fromkeys(m.group(0).lower() for m in INVENTED.finditer(body)))
         if not unsupported and any("does not name" in f for f in facts) and \
                 re.search(r"took part|alongside|participat|you joined|you were in|with you in|you invested", body, re.I):
             unsupported = ["that you took part (the announcement does not name you)"]
