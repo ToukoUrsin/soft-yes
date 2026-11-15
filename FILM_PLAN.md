@@ -1,8 +1,8 @@
 # Soft Yes film plan (max 1:55)
 
-**The cold open is in front (15.11, 01:50 EET):** `film/out/film.mp4` is `/bulk3/runs/opens/final/softyes/open.mp4` (10 s) and then the cut inside Claude (93 s), 1:43 in all. The open ends on the film's own window, empty, and the film's first screen comes up inside it; the first line is still "You're raising a pre-seed round. Who do you talk to? Ask Claude." The shots were recorded again on the new card (chains of introductions, 1,172 facts).
+**The film to show (15.11, 06:00 EET):** `film/out/film.mp4`, 1:56, at https://soft-yes.fly.dev/film.mp4. The founder reads it himself. In order: the cold open (10 s), the team on camera, the question typed into Claude ("who should fund my AI lab?"), companies like yours and the 65 investors in their rounds, the eight signals on each investor, Ovni Capital's latest rounds, the way in from Kfund to Ovni in three introductions, the soft yes as one more way in, the closing card, the team saying thanks. How it is made: `film/README.md`.
 
-The film to show is `film/out/film.mp4` (1:43: the 10 s cold open, then the cut inside Claude; see the last section). It is at https://soft-yes.fly.dev/film.mp4. The plan below is the website cut, `film/out/demo-2.mp4` (87 s). Every number below was read from https://soft-yes.fly.dev on 14 Nov 2026.
+The plan below is the earlier website cut, `film/out/demo-2.mp4` (87 s), kept as it was written. Every number in it was read from https://soft-yes.fly.dev on 14 Nov 2026.
 
 ## The story in 3 lines
 - **Who:** a founder raising a round.
@@ -55,18 +55,17 @@ All shots: laptop, Chrome, private window, 1440×900, zoom 100%, bookmarks bar h
 - **Never type on camera:** an investor name other than Tesi, Innovestor or Creandum on the home page, or a company other than Lovable or Measur on Page check. A new name starts a live walk: it spends Cala credits and takes much longer (expect about a minute; not timed today).
 - Shot 2 uses Replay the walk on purpose: on the very first walk from the home page the header reads "Reading Tesi's 19 rounds" for half a second while the label under Tesi says 18.
 
-## The cut inside Claude (made 15 Nov, 1:43 with the open)
+## The cut inside Claude (made 15 Nov, 1:56)
 
-`film/out/film.mp4` is the film to show: the cold open (10 s), then `film/out/demo-3.mp4` (93 s), recorded in real Claude on claude.ai. How to make it again: `film/README.md`.
+`film/out/film.mp4` is the film to show, recorded in real Claude on claude.ai and read by the founder. How to make it again: `film/README.md`.
 
-| # | Time | On screen | Voice-over (exact) |
+| # | Time | On screen | Voice (exact) |
 |---|---|---|---|
-| 0 | 0:00-0:10 | The cold open: a row of dominoes with its first place empty, a light finds the tile that starts it. "They said yes. If you find a lead investor." Then "635 of 889 lead-investor claims confirmed word for word". It ends on the empty Claude window. | none |
-| 1 | 0:10-0:14 | Claude, new chat. The question is typed and sent. | "You're raising a pre-seed round. Who do you talk to? Ask Claude." |
-| 2 | 0:14-0:36 | The card draws in the chat: the companies Cala names, their investors, the rounds Cala AI's investors sat in, a dot for each thing an investor's own record says, then the counts. | "Soft Yes asks Cala's graph for companies like yours. It reads their rounds, and who invested. And the rounds an investor you know sat in. Everyone else in them is one intro away. Then it reads Cala's record of each investor. Does it lead rounds? Is it still investing? Eleven hundred and seventy-two facts from Cala. None from a language model." |
-| 3 | 0:36-1:04 | The list. Ovni Capital with the sentence from thesaasnews.com. Then its way in, link by link: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital, each link a round with "the page names both". Then "Why #1", the sum. Then Accel is opened: 3 rounds with Lightspeed. | "Start with Ovni Capital. It led a pre-seed like yours this month. Cala's source page says so. Nobody you know has invested with Ovni. So it reads further: from Kfund, who you know, to FJ Labs, to Contrarian, to Ovni. Each link is a round they shared, checked on the page. And this is why Ovni comes first: a sum you can read. Accel sat in three rounds with Lightspeed, an investor you know. That's your way in." |
-| 4 | 1:04-1:24 | A second question: Tesi and Innovestor are in once there is a lead. The walk draws, ticks land. Then "The page names another lead": Cala's line struck, the page's line under it. | "Later, two investors say: we're in, if you find a lead. That's a soft yes. So it finds who led the rounds they joined. Then it reads Cala's source page for every lead. Forty-seven check out. Two don't. Cala has Lifeline leading Measur's round. The page says VentureFriends led it. So it's struck out." |
-| 5 | 1:24-1:37 | Emergence Capital, its sentence from verda.com, "Tesi opens the door". Draft the ask to Tesi. The ask, then its list of facts. | "Emergence Capital led Verda's round with Tesi in it. So Tesi opens the door. One click writes the ask to Tesi. Every fact in it is listed, with where it's from." |
-| 6 | 1:37-1:43 | Soft Yes, soft-yes.fly.dev. | "Soft Yes. Find your investors in Cala's graph, in Claude." |
-
-Nobody has heard it by ear: the open's sound (quiet stone knocks, no music) and the five new voice lines were only measured. If the open's sound is wrong, `OPEN_MUTE=1 film/join.sh` and publish again.
+| 0 | 0:00-0:10 | The cold open: a row of dominoes, a light finds the tile that starts it. | "I'm about to raise a round. Who do I raise from? And who gets me in the door?" |
+| 1 | 0:10-0:21 | The team on camera (their own sound). | "Raising a massive round, even in the age of AI, is difficult. We just wish there was something we could plug into our Claude that would help us." |
+| 2 | 0:21-0:25 | Claude, new chat. The question is typed and sent. | "So I asked Claude: who should fund my AI lab?" |
+| 3 | 0:25-0:35 | The card draws in the chat: the companies Cala names, then the investors in their rounds, then the counts. | "Soft Yes pulls companies like mine from Cala, then the 65 investors in their rounds. None of it comes from the AI." |
+| 4 | 0:35-1:34 | The list with a dot for each of the eight signals. Ovni Capital opened: its signals one by one, its last five rounds, who it invests with, then the way in link by link: Cala AI, Kfund, FJ Labs, Contrarian Ventures, Ovni Capital. | "How do I pick? Eight signals for each investor, all read from Cala. Is it investing now? Is it near me?" "Ovni Capital comes first, with seven of the eight. Has it backed my field lately? This November it co-led the pre-seed of Bleu Robotics, which makes AI training software for robots. It led two of its three pre-seeds, and closed a 57 million dollar fund last year." "Here are its last five rounds. Two are in my field. It has invested twice with Daphni and twice with Kima, so I'd pitch those two next." "I've never met Ovni. But I know the Cala team. Their investor Kfund did a round with FJ Labs. FJ Labs did two with Contrarian. Contrarian co-led Bleu Robotics with Ovni. That's three intros from Kfund, and every link opens the page that names both funds." |
+| 5 | 1:34-1:46 | A second question: Tesi and Innovestor said yes if there is a lead. The rounds they joined, then who led them: Emergence Capital first. | "Two investors told me yes, if I find a lead. That's a soft yes. I name them, and it shows who led the rounds they joined." |
+| 6 | 1:46-1:54 | Soft Yes, soft-yes.fly.dev. | "It's called Soft Yes. Add it to Claude or ChatGPT and ask." |
+| 7 | 1:54-1:56 | The team (their own sound). | "Thank you for watching!" |

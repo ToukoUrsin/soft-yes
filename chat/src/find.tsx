@@ -7,7 +7,7 @@ import { type ChainLink, type FindCompany, type FindData, type FindInvestor, typ
 import { Btn, Count, Head, Icon, Ledger, Link, Quote, Src, useWidth } from './ui'
 import { Fixes, drawn } from './walk'
 
-const ORDER = ['field', 'leads', 'stage', 'recent', 'size', 'place', 'path']
+const ORDER = ['field', 'lately', 'leads', 'stage', 'recent', 'fund', 'size', 'place', 'path']
 /** Text assembled at the server uses the typewriter apostrophe; the card sets it as type. */
 const ty = (s?: string | null) => (s || '').replace(/'/g, '’')
 const NAMED = '~cala'   // the node for investors Cala's own answer names, with no company of the list behind them
@@ -279,7 +279,39 @@ function Chain({ x }: { x: FindInvestor }) {
   )
 }
 
-function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boolean; onToggle: () => void; short: boolean; onNet: (x: FindInvestor) => void }) {
+/** What the investor did lately: its newest rounds in Cala, each read through to the company and the industries Cala files it under, and the funds it keeps investing with. */
+function Latest({ x, via }: { x: FindInvestor; via?: string | null }) {
+  const rows = x.latest || []
+  const cos = x.cos || []
+  const stage = (n?: string | null) => !n ? 'round' : /^series/i.test(n) ? n : n.toLowerCase()
+  return (
+    <div class="lat">
+      <p class="lat__k"><Src kind="cala" label="Its latest rounds in Cala" /><span>Read through the graph: the investor, its rounds, each company, the company’s industry.</span></p>
+      <ol class="lat__t">
+        {rows.map((l, k) => (
+          <li key={l.round} class={l.in_field ? 'is-in' : ''} style={{ '--k': k }}>
+            <span class="lat__d num">{month(l.date) || 'no date'}</span>
+            <span class="lat__c">
+              <b>{l.url ? <Link href={l.url}>{ty(l.company)}</Link> : ty(l.company)}</b>
+              <span>{stage(l.stage_name)}{l.money ? `, ${l.money}` : ''}</span>
+              {l.led && <i class="lat__led">led</i>}
+              {l.in_field && <i class="lat__f">your field</i>}
+            </span>
+            <span class="lat__w">{[l.industries.slice(0, 2).join(', '), l.with.length ? `with ${l.n_with > 2 ? `${l.with.slice(0, 2).map(ty).join(', ')} and ${l.n_with - 2} more` : listAnd(l.with.slice(0, 2).map(ty))}` : ''].filter(Boolean).join(' · ')}</span>
+          </li>
+        ))}
+      </ol>
+      {cos.length > 0 && (
+        <p class="lat__cos">
+          <b>Invests with.</b>{' '}
+          {cos.map((k, n) => <span key={k.name}>{n ? ', ' : ''}{ty(k.name)} <span class="dim">({plural(k.rounds, 'round')}{k.yours ? (via ? `, an investor in ${ty(via)}` : ', your investor') : ''})</span></span>)}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function Row({ x, open, onToggle, short, onNet, via }: { x: FindInvestor; open: boolean; onToggle: () => void; short: boolean; onNet: (x: FindInvestor) => void; via?: string | null }) {
   const cites = [
     ...x.deals.map((dl) => ({ what: [dl.company, dl.stage_name, month(dl.date), dl.money].filter(Boolean).join(', ') + (dl.led ? ', led' : ''), src: dl.url ? { url: dl.url, publisher: dl.publisher } : dl.sources[0] })),
     ...(x.ways || []).map((dl) => ({ what: [dl.company, dl.stage_name, month(dl.date), dl.money].filter(Boolean).join(', ') + (dl.led ? ', led' : '') + `, with ${listAnd(dl.with.slice(0, 2))}`, src: dl.url ? { url: dl.url, publisher: dl.publisher } : dl.sources[0] })),
@@ -296,7 +328,7 @@ function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boole
             <span>{ty(x.line)}</span>
           </span>
           <span class="sgs">
-            {x.signals.map((s) => <span key={s.id} class={`sg${s.on ? ' is-on' : s.far ? ' is-far' : ''}`}><i />{s.far ? `${s.far} introductions away` : s.label}{s.id === 'field' && (s.n ?? 0) > 1 ? ` ×${s.n}` : ''}</span>)}
+            {x.signals.map((s) => <span key={s.id} class={`sg${s.on ? ' is-on' : s.far ? ' is-far' : ''}`}><i />{s.far ? `${s.far} introductions away` : s.label}{(s.id === 'field' || s.id === 'lately') && s.on && (s.n ?? 0) > 1 ? ` ×${s.n}` : ''}{s.id === 'fund' && s.on && x.fund?.size ? ` ${x.fund.size}` : ''}</span>)}
           </span>
         </span>
         <Icon name="down" size={14} class="lead__chev" />
@@ -316,10 +348,11 @@ function Row({ x, open, onToggle, short, onNet }: { x: FindInvestor; open: boole
             {x.signals.map((s) => (
               <li key={s.id} class={s.on ? 'is-on' : s.far ? 'is-far' : 'is-off'}>
                 <Icon name={s.on ? 'check' : s.far ? 'net' : 'x'} size={12} />
-                <span><b>{s.label}.</b> {ty(s.text)}.</span>
+                <span><b>{s.label}.</b> {ty(s.text)}.{s.url ? <> <Link href={s.url}>the page</Link></> : null}</span>
               </li>
             ))}
           </ul>
+          {x.latest && x.latest.length > 0 && <Latest x={x} via={via} />}
           {x.chain && x.chain.links.length > 0 && <Chain x={x} />}
           {x.sum && x.sum.parts.length > 0 && (
             <div class="sum">
@@ -495,7 +528,7 @@ export function Find({ data: d, cardId, roomy, fit, canExpand, onExpand }: {
             {shown.flatMap((x, i) => [
               x.in_field === false && i > 0 && shown[i - 1].in_field !== false
                 ? <li key="tier" class="tier">Below: only shared a round with {d.ask.via_company ? `${d.ask.via_company}’s` : 'your'} investors. Cala shows none in a company like yours.</li> : null,
-              <Row key={x.key} x={x} short={!wide} open={open.includes(x.key)} onToggle={() => setOpen(open.includes(x.key) ? open.filter((k) => k !== x.key) : [...open, x.key])} onNet={net} />,
+              <Row key={x.key} x={x} short={!wide} open={open.includes(x.key)} onToggle={() => setOpen(open.includes(x.key) ? open.filter((k) => k !== x.key) : [...open, x.key])} onNet={net} via={d.ask.via_company} />,
             ])}
           </ol>
           {d.investors.some((x) => x.sum) && <p class="facts__note order">{words ? `Companies like yours are the ones Cala names for ${words}${d.ask.like.length ? ', and the ones you named' : ''}. On top: investors Cala has in one of them, or lists for your field.` : 'On top: investors Cala has in a company like yours.'} Highest score first. The score adds up their rounds and their own record in Cala. Open one to see the sum.</p>}

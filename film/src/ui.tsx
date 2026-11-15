@@ -108,7 +108,7 @@ export const fit = (b: Box, w: number, o: {ax?: number; top?: number; minX?: num
 // One frame of a recorded clip. In a render it is fetched from Remotion's frame server like <OffthreadVideo> does,
 // but tried again when the request is dropped: on a machine where containers come and go, Chrome cancels
 // requests in flight on every network change, and one dropped frame would otherwise end the whole render.
-const ClipFrame: React.FC<{file: string; frame: number; w: number; h: number}> = ({file, frame, w, h}) => {
+export const ClipFrame: React.FC<{file: string; frame: number; w: number; h: number}> = ({file, frame, w, h}) => {
 	const style: React.CSSProperties = {position: 'absolute', left: 0, top: 0, width: w, height: h};
 	const rendering = getRemotionEnvironment().isRendering;
 	const [img, setImg] = React.useState<{src: string; handle: number} | null>(null);

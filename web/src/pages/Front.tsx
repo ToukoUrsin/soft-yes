@@ -86,7 +86,7 @@ export function Front() {
 
       {add('front__add front__add--below')}
       <p className="front__more">
-        <a className="link" href="/film.mp4">Watch the film (1:43)</a>
+        <a className="link" href="/film.mp4">Watch the film (1:56)</a>
         <Link className="link" href="/find">Start from your own company</Link>
         <Link className="link" href="/audit">Every “led” we checked</Link>
       </p>

@@ -136,7 +136,7 @@ export interface ClaimData {
 }
 
 export interface Cite { publisher?: string | null; url?: string | null; date?: string | null }
-export interface Signal { id: string; label: string; on: boolean; text: string; n?: number; via?: string[]; far?: number }
+export interface Signal { id: string; label: string; on: boolean; text: string; n?: number; via?: string[]; far?: number; url?: string | null }
 /** One link of a way in: two investors and the rounds Cala holds them both in. */
 export interface ChainLink { a: string; b: string; rounds: number; company?: string | null; stage_name?: string | null; date?: string | null; url?: string | null; led?: boolean; size?: number | null; strength?: number; named?: 'both' | 'one' | 'none' | 'unread' | 'late' }
 export interface FindDeal { company?: string; stage_name?: string; date?: string | null; led: boolean; status?: string | null; quote?: string | null; url?: string | null; publisher?: string | null; led_by?: string[] | null; sources: Cite[]; money?: string | null }
@@ -164,6 +164,12 @@ export interface FindInvestor {
   score?: number
   in_field?: boolean
   sum?: { parts: { points: number; text: string }[]; times: { by: number; text: string }[] } | null
+  /** its newest rounds in Cala, each read through to the company and its industries */
+  latest?: { company: string; round: string; stage?: string | null; stage_name?: string | null; date?: string | null; led: boolean; money?: string | null; with: string[]; n_with: number; industries: string[]; in_field: boolean; url?: string | null }[]
+  /** the funds in the most rounds next to it */
+  cos?: { name: string; rounds: number; company?: string | null; yours: boolean }[]
+  /** the last fund it raised, from a page Cala holds */
+  fund?: { name?: string | null; size: string; date: string; when: string; url?: string | null; publisher?: string | null } | null
 }
 export interface FindCompany {
   id: string

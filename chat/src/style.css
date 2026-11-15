@@ -251,6 +251,21 @@ b { font-weight: 600; }
 .chain__tie.is-thin { color: var(--ink3); font-weight: 500; }
 .chain__pg { display: inline-flex; align-items: baseline; gap: 3px; font-size: 11.5px; color: var(--ink3); }
 .chain__pg.is-ok .ic { color: var(--good); position: relative; top: 1px; }
+/* what the investor did lately: one line per round, the date in a column of its own, the rounds in the founder's field marked */
+.lat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; }
+.lat__k { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; font-size: 12.5px; color: var(--ink3); }
+.lat__t { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
+.lat__t li { display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 10px; align-items: baseline; font-size: 13px; line-height: 19px; color: var(--ink2); animation: rise .3s var(--ease) both; animation-delay: calc(var(--k, 0) * 45ms); }
+.lat__d { color: var(--ink3); font-size: 12.5px; white-space: nowrap; }
+.lat__t li.is-in .lat__d { color: var(--ink); font-weight: 550; }
+.lat__c { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; min-width: 0; }
+.lat__c b { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.lat__c .lnk .ic { display: inline; vertical-align: -1px; margin-left: 3px; }
+.lat__led, .lat__f { font-style: normal; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line2); color: var(--ink2); white-space: nowrap; }
+.lat__f { border-color: var(--ink); background: var(--ink); color: var(--inv); font-weight: 550; }
+.lat__w { grid-column: 2; font-size: 12px; line-height: 17px; color: var(--ink3); overflow-wrap: anywhere; }
+.lat__cos { font-size: 13px; color: var(--ink2); text-wrap: pretty; }
+.lat__cos b { color: var(--ink); font-weight: 550; }
 .sum { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .sum__k { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; font-size: 12.5px; color: var(--ink3); }
 .sum ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }

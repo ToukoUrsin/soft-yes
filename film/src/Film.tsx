@@ -3,8 +3,8 @@ import {AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame}
 import {ORDER, type Cut, type SceneId, type VoLine, cut3, timeline, vo} from './data';
 import {SceneAsk, SceneAudit, SceneClose, SceneLead, SceneNext, SceneOpen, SceneTurn} from './scenes';
 import {SCENES3} from './scenes3';
-import {C, FPS, SANS, clamp} from './theme';
-import {Backdrop, Grain} from './ui';
+import {C, FPS, MONO, SANS, clamp} from './theme';
+import {Backdrop, ClipFrame, Grain} from './ui';
 
 // The film: seven scenes, each as long as its narration (src/data.ts builds the timeline from src/data/vo.json).
 const SCENES: Record<SceneId, React.FC> = {
@@ -53,8 +53,8 @@ const chunks = (l: VoLine) => {
 	split(cur);
 	return out;
 };
-// lines that are already on screen as large type are not captioned a second time
-const typeset = (_scene: string, text: string) => text.startsWith('Soft Yes. ');
+// lines that are already on screen as large type are not captioned a second time: the cold open's line is set in type over it (OpenType)
+const typeset = (scene: string, text: string) => scene === 'open' || text.startsWith('Soft Yes. ');
 const Captions: React.FC<{cut: Cut}> = ({cut}) => {
 	const frame = useCurrentFrame();
 	for (const {line, at, scene} of spokenOf(cut)) {
@@ -81,22 +81,26 @@ const Captions: React.FC<{cut: Cut}> = ({cut}) => {
 const musicVolOf = (cut: Cut) => {
 	const lines = spokenOf(cut);
 	const total = cut.timeline().total;
-	const voiceOn = (f: number) => lines.some((l) => f >= l.at * FPS - 7 && f <= (l.at + l.line.dur) * FPS + 7);
+	const from = cut.musicFrom?.() ?? 0;
+	const on = (f: number, live: boolean) => lines.some((l) => !!(l.line as {live?: boolean}).live === live && f >= l.at * FPS - 7 && f <= (l.at + l.line.dur) * FPS + 7);
+	// under the narration the music is low; under the team's own clips (a phone in a loud room) lower still
+	const level = (f: number) => (on(f, true) ? 0.06 : on(f, false) ? 0.12 : 0.3);
 	return (f: number) => {
-		const fade = interpolate(f, [0, 18], [0, 1], clamp) * interpolate(f, [total - 75, total - 3], [1, 0], clamp);
+		const fade = interpolate(f, [from, from + 18], [0, 1], clamp) * interpolate(f, [total - 75, total - 3], [1, 0], clamp);
 		// eased over a few frames so the duck is not heard as a step
 		let v = 0;
-		for (let k = -4; k <= 4; k++) v += voiceOn(f + k) ? 0.12 : 0.3;
+		for (let k = -4; k <= 4; k++) v += level(f + k);
 		return fade * (v / 9);
 	};
 };
 
 // A cut of the film: its scenes in order, each as long as its narration, with captions, voice and music.
-const makeFilm = (cut: Cut, scenes: Record<string, React.FC>): React.FC<{audio?: boolean; captions?: boolean}> => ({audio = true, captions = true}) => {
+const makeFilm = (cut: Cut, scenes: Record<string, React.FC>, Over?: React.FC<{audio: boolean}>): React.FC<{audio?: boolean; captions?: boolean}> => ({audio = true, captions = true}) => {
 	const tl = cut.timeline();
 	const {ORDER, vo} = cut;
 	const spoken = () => spokenOf(cut);
 	const musicVol = React.useMemo(() => musicVolOf(cut), []);
+	const mFrom = cut.musicFrom?.() ?? 0; // the film frame the music starts on (musicVol takes film frames)
 	return (
 		<AbsoluteFill>
 			<Backdrop />
@@ -110,6 +114,7 @@ const makeFilm = (cut: Cut, scenes: Record<string, React.FC>): React.FC<{audio?:
 			})}
 			<AbsoluteFill style={{pointerEvents: 'none', background: 'radial-gradient(ellipse at 50% 50%, transparent 66%, rgba(0,0,0,0.3) 100%)'}} />
 			<Grain />
+			{Over ? <Over audio={audio} /> : null}
 			{captions ? <Captions cut={cut} /> : null}
 			{audio
 				? spoken().map((l, i) => (
@@ -118,10 +123,66 @@ const makeFilm = (cut: Cut, scenes: Record<string, React.FC>): React.FC<{audio?:
 						</Sequence>
 					))
 				: null}
-			{audio && vo.music ? <Audio src={staticFile(vo.music)} volume={musicVol} /> : null}
+			{audio && vo.music ? (
+				<Sequence from={mFrom} name="music">
+					<Audio src={staticFile(vo.music)} volume={(f) => musicVol(f + mFrom)} />
+				</Sequence>
+			) : null}
 		</AbsoluteFill>
 	);
 };
 export const Film = makeFilm({vo, ORDER, timeline} as unknown as Cut, SCENES);
+// The cold open (made in ~/junction/opens: 10.0 s, 24 fps) plays over everything for the length of the scene `open`,
+// the film's first. It ends on the film's own window with nothing in it, on the film's own background and vignette, so
+// it sits above the vignette and the grain, and its last frame fades out over the next scene (the team, in that
+// window), which is already there under it.
+const OPEN_FADE = 8;
+// The words over it, as the voice says them: the founder's two questions. The open's own corners are kept for type.
+const OpenType: React.FC = () => {
+	const frame = useCurrentFrame();
+	const at = (w: string, nth = 0) => Math.round((cut3.said('open', 0, w, nth) - 0.08) * FPS);
+	const row = (from: number): React.CSSProperties => {
+		const o = interpolate(frame, [from, from + 7], [0, 1], clamp);
+		return {opacity: o, transform: `translateY(${(1 - o) * 10}px)`};
+	};
+	const big: React.CSSProperties = {fontSize: 62, fontWeight: 700, letterSpacing: -2.2, lineHeight: 1.12, whiteSpace: 'nowrap'};
+	const shadow = '0 2px 26px rgba(0,0,0,0.95), 0 0 5px rgba(0,0,0,0.85)';
+	const top = interpolate(frame, [6.1 * FPS, 6.45 * FPS], [1, 0], clamp); // gone before the open cuts to the fallen tile
+	const low = interpolate(frame, [8.15 * FPS, 8.5 * FPS], [1, 0], clamp); // gone before the tile's face fills the window
+	return (
+		<AbsoluteFill style={{fontFamily: SANS, color: C.text, textShadow: shadow}}>
+			<div style={{position: 'absolute', left: 0, top: 0, width: 1100, height: 420, opacity: top * Number(row(at("i'm")).opacity), background: 'radial-gradient(ellipse at 30% 38%, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.4) 45%, transparent 72%)'}} />
+			<div style={{position: 'absolute', left: 96, top: 84, opacity: top}}>
+				<div style={{...row(at("i'm")), fontFamily: MONO, fontSize: 22, fontWeight: 700, letterSpacing: 2.4, color: C.accent}}>I’M ABOUT TO RAISE A ROUND</div>
+				<div style={{...row(at('who')), ...big, marginTop: 16}}>Who do I raise from?</div>
+			</div>
+			<div style={{position: 'absolute', left: 96, top: 884, opacity: low}}>
+				<div style={{...row(at('and')), ...big}}>And who gets me in the door?</div>
+			</div>
+		</AbsoluteFill>
+	);
+};
+const Open3Layer: React.FC<{audio: boolean; len: number}> = ({audio, len}) => {
+	const frame = useCurrentFrame();
+	return (
+		<AbsoluteFill style={{opacity: interpolate(frame, [len, len + OPEN_FADE], [1, 0], clamp), background: '#000'}}>
+			<ClipFrame file="open/open_clean.mp4" frame={Math.min(frame, len - 1)} w={1920} h={1080} />
+			<OpenType />
+			{audio ? (
+				<Sequence from={0} durationInFrames={len + OPEN_FADE} name="open-sound">
+					<Audio src={staticFile('open/open.wav')} volume={(f) => 0.3 * interpolate(f, [len - 4, len + OPEN_FADE], [1, 0], clamp)} />
+				</Sequence>
+			) : null}
+		</AbsoluteFill>
+	);
+};
+const Open3Over: React.FC<{audio: boolean}> = ({audio}) => {
+	const {from, dur} = cut3.timeline().scenes.open;
+	return (
+		<Sequence from={from} durationInFrames={dur + OPEN_FADE} name="open">
+			<Open3Layer audio={audio} len={dur} />
+		</Sequence>
+	);
+};
 // the cut made inside Claude
-export const Film3 = makeFilm(cut3 as unknown as Cut, SCENES3);
+export const Film3 = makeFilm(cut3 as unknown as Cut, SCENES3, Open3Over);

@@ -28,8 +28,8 @@ ffmpeg -nostdin -loglevel error -y -i "$raw" -c:v copy \
 	-af "loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=$(g input_i):measured_TP=$(g input_tp):measured_LRA=$(g input_lra):measured_thresh=$(g input_thresh):offset=$(g target_offset):linear=true" \
 	-ar 48000 -c:a aac -b:a 192k -movflags +faststart "out/demo-$v.mp4"
 if [ "$v" = 3 ]; then
-	# the finished search in the chat, with its counts outlined
-	at=${SHOT_AT:-25}
+	# who could lead, drawn in the chat, with the page being read under it
+	at=${SHOT_AT:-27}
 	ffmpeg -nostdin -loglevel error -y -ss "$at" -i "out/demo-$v.mp4" -frames:v 1 out/screenshot-3.png
 	echo "screenshot-3.png: the frame at $at s"
 	ls -la "out/demo-$v.mp4" out/screenshot-3.png

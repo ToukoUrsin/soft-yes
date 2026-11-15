@@ -15,7 +15,7 @@ Soft Yes is a connector for Claude. You ask in the chat and the answer is a card
 1. asks Cala's graph for companies like yours,
 2. reads their rounds and who invested, and the rounds joined by investors you already know,
 3. reads Cala's own record of each investor it lists,
-4. ranks them by what that record says: backs your field, leads rounds, at your stage, active now, near you, and a way in through someone you know. Open an investor and the card shows the sum that put it there. No shared round? It reads further in the graph, up to three introductions, each one a round both funds sat in, and says if the page for that round names both.
+4. ranks them on eight signals, each read from that record: backs your field, did a round in your field lately, leads rounds, invests at your stage, active now, raised a new fund, near you, and a way in through someone you know. Open an investor and the card shows its last five rounds in Cala with dates and who else was in, who it invests with, and the sum that put it there. No shared round? It reads further in the graph, up to three introductions, each one a round both funds sat in, and says if the page for that round names both.
 
 **Who could lead?** Every founder hears it: "We like it. We're in once you have a lead." Name the investors who told you that. Soft Yes then
 

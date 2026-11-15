@@ -1,4 +1,5 @@
 import capJson from './data/cap.json';
+import audit3Json from './data/audit3.json';
 import cap3Json from './data/cap3.json';
 import timing from './data/timing.json';
 import timing3 from './data/timing3.json';
@@ -9,7 +10,7 @@ import {FPS} from './theme';
 // What the capture saw (film/capture/capture.py, and claude_shots.py for the cut made inside Claude) and what the voice says (film/scripts/make-vo.mjs).
 export type Box = [number, number, number, number];
 export type Clip = {file: string; w: number; h: number; dur: number; marks: Record<string, number>; boxes: Record<string, number[]>; facts: any};
-export const cap = {...capJson, ...cap3Json} as unknown as Record<'walk' | 'check' | 'page' | 'lead' | 'ask' | 'audit' | 'next' | 'cfind' | 'clist' | 'cwalk' | 'cfix' | 'cdraft', Clip>;
+export const cap = {...capJson, ...cap3Json} as unknown as Record<'walk' | 'check' | 'page' | 'lead' | 'ask' | 'audit' | 'next' | 'cfind' | 'clist' | 'cwalk' | 'cfix' | 'cdraft' | 'cinv' | 'csoft', Clip>;
 export type ClipName = keyof typeof cap;
 export const box = (clip: ClipName, name: string): Box => {
 	const b = cap[clip].boxes[name];
@@ -29,10 +30,11 @@ export type Cue = {s: number; e: number; line: VoLine};
 
 // One cut of the film: its narration and its scene order. Each scene is as long as its narration plus its tail
 // (the music is cut to the same total). Each line starts `gap` seconds after the line before it in its scene.
-export const cutOf = <Id extends string>(voIn: unknown, timingIn: {order: string[]; tail: Record<string, number>}) => {
+export const cutOf = <Id extends string>(voIn: unknown, timingIn: {order: string[]; tail: Record<string, number>; fixed?: Record<string, number>; musicFrom?: string}) => {
 	const vo = voIn as Vo;
 	const ORDER = timingIn.order as Id[];
 	const TAIL = timingIn.tail as Record<Id, number>;
+	const FIXED = (timingIn.fixed ?? {}) as Partial<Record<Id, number>>; // a scene whose length is its picture's, not its narration's
 	const build = () => {
 		const scenes = {} as Record<Id, {cues: Cue[]; dur: number; from: number}>;
 		let from = 0;
@@ -46,7 +48,7 @@ export const cutOf = <Id extends string>(voIn: unknown, timingIn: {order: string
 					t = s + line.dur;
 					cues.push({s, e: t, line});
 				});
-			const dur = Math.ceil((t + TAIL[id]) * FPS);
+			const dur = FIXED[id] ? Math.round(FIXED[id]! * FPS) : Math.ceil((t + TAIL[id]) * FPS);
 			scenes[id] = {cues, dur, from};
 			from += dur;
 		}
@@ -64,7 +66,9 @@ export const cutOf = <Id extends string>(voIn: unknown, timingIn: {order: string
 		if (!hits[nth]) throw new Error(`scene ${id} line ${line} ("${c.line.text}") has no word "${word}"`);
 		return c.s + hits[nth].s;
 	};
-	return {vo, ORDER, timeline, cues, said};
+	// the frame at which the music starts: the scene named in the timing file (the team talks without music), or the film's first frame
+	const musicFrom = () => (timingIn.musicFrom ? timeline().scenes[timingIn.musicFrom as Id].from : 0);
+	return {vo, ORDER, timeline, cues, said, musicFrom};
 };
 export type Cut = ReturnType<typeof cutOf>;
 
@@ -73,5 +77,7 @@ export type SceneId = 'open' | 'turn' | 'lead' | 'ask' | 'audit' | 'next' | 'clo
 const one = cutOf<SceneId>(voJson, timing);
 export const {vo, ORDER, timeline, cues, said} = one;
 // the cut made inside Claude
-export type Scene3 = 'ask' | 'draw' | 'list' | 'soft' | 'draft' | 'close';
+export type Scene3 = 'team' | 'open' | 'ask' | 'find' | 'inv' | 'soft' | 'close' | 'thanks';
 export const cut3 = cutOf<Scene3>(vo3Json, timing3);
+// the audit's numbers when the voice was recorded (scripts/audit.mjs)
+export const audit3 = audit3Json as {claims: number; confirmed: number; corrected: number; unstated: number; unread: number};

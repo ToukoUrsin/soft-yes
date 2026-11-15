@@ -33,7 +33,7 @@ PATH_ROUNDS = 4     # rounds near the asked stage, per investor the founder know
 PATH_TOTAL = 16
 NAMED_RECORDS = 6   # of the own records, the ones kept for investors Cala only names
 WAY_RECORDS = 8     # own records read for investors found only through those rounds
-VERSION = 15         # of the stored result: a search stored by older logic is read again (Cala's answers are kept, so it costs little)
+VERSION = 17         # of the stored result: a search stored by older logic is read again (Cala's answers are kept, so it costs little)
 FAR_DEPTH = 3       # how many introductions a way in may take: your investor, a fund it sat with, a fund that one sat with
 FAR_READS = 10      # rounds read only to name the round two funds shared
 DEEP_MINE = 50      # of each investor the founder knows: its latest rounds read with everyone in them
@@ -41,6 +41,12 @@ DEEP_MINE_TOTAL = 120
 DEEP_OWN = 8        # front-runners with no round next to those investors, whose own latest rounds are read
 DEEP_OWN_ROUNDS = 6
 DEEP_FRESH = 16     # of each of those two reads, the rounds Cala is asked for anew; the rest come from rounds already held
+LATEST_INVESTORS = 12   # front-runners whose latest rounds are read for what they did lately
+LATEST_ROUNDS = 5       # of each, its latest rounds: read with the company, everyone in the round, and the company's industries
+LATEST_FRESH = 48       # of those rounds and of their companies, how many are asked of Cala anew
+FUND_ASKS = 8           # front-runners Cala's knowledge search is asked about a new fund
+FUND_MONTHS = 36        # a fund closed this lately is still being invested
+FUND_SECONDS = 50       # an answer later than this is left out of this search (it is kept for the next one)
 # An accelerator sits next to hundreds of funds without knowing them: it is never a link in a chain of introductions.
 HUBS = re.compile(r"\b(y combinator|techstars|500 global|500 startups|plug and play|antler|entrepreneur first|startup wise guys|"
                   r"masschallenge|alchemist accelerator|station f|founder institute|accelerator|incubator)\b", re.I)
@@ -325,6 +331,106 @@ async def _find_company(cala: Cala, name: str, ledger: Ledger, exact: bool = Fal
     return {"id": pick["id"], "name": pick["name"]} if pick else None
 
 
+AI_WORDS = re.compile(r"\b(AI|A\.I\.|LLMs?)\b|artificial intelligence|machine learning|language model|deep learning|neural net", re.I)
+FIELD_STOP = {"and", "the", "for", "tech", "technology", "technologies", "software", "company", "companies", "startup", "startups"}
+
+
+def _in_field(sector: str, industries: list[str], description: str | None) -> bool:
+    """Is a company in the founder's field, by what Cala holds on it: its industries and its description."""
+    sector = (sector or "").strip().lower()
+    if not sector:
+        return False
+    text = " ".join(industries).replace("_", " ").lower() + " . " + (description or "")
+    low = text.lower()
+    if sector in low:
+        return True
+    if AI_WORDS.search(sector) or sector in ("ai", "genai", "generative ai"):
+        return bool(re.search(r"\bAI\b|artificial intelligence|machine learning|language model|deep learning|neural net", text, re.I))
+    words = [w for w in re.findall(r"[a-z]{3,}", sector) if w not in FIELD_STOP]
+    return bool(words) and all(re.search(rf"\b{re.escape(w[:6])}", low) for w in words)
+
+
+FUND_Q = ("What is the most recent fund that the investment firm {name} raised or closed? Answer on one line in exactly this form: "
+          "FUND NAME | SIZE | MONTH YEAR OF THE CLOSE. If you do not know, answer: unknown.")
+FUND_LINE = re.compile(r"^\W*([^|\n]{2,80}?)\s*\|\s*([^|\n]{2,60}?)\s*\|\s*([^|\n]{2,80})$", re.M)
+FUND_MONTH = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(20\d\d)\b", re.I)
+
+
+def _first_word(name: str) -> str:
+    return (re.split(r"[\s,]+", (name or "").strip().lower()) or [""])[0]
+
+
+LEGAL_TAIL = re.compile(r"\s+(?:Spółka|Sp\.\s*z\s*o\.?\s*o\.?|S\.?A\.?S?\.?$|GmbH|B\.?V\.?$|Ltd\.?$|Limited$|LLC$|L\.?P\.?$|Inc\.?$|AB$|Oy$|ApS$|AS$).*$", re.I)
+
+
+def _short(name: str) -> str:
+    """A fund's name without the legal form after it."""
+    return LEGAL_TAIL.sub("", name).strip() or name
+
+
+FIRM_WORDS = re.compile(r"\b(?:ventures?|capital|partners?|vc|fund|funds|invest\w*|labs?|group|holdings?|angels?|seed|equity|management|"
+                        r"tech\w*|ai|global|bank|foundation|studio|combinator|accelerator|collective|club|syndicate|company|co|asset|growth|"
+                        r"innovation|industries|ban|network|alliance|family|office|trust|corp\w*|gmbh|ltd|llc|inc|ab|oy|sa|bv)\b", re.I)
+
+
+def _firm_like(name: str) -> bool:
+    """'Cherry Ventures', 'Accel', '20VC' read as firms; 'Erik Engellau-Nilsson' reads as a person."""
+    words = (name or "").split()
+    if len(words) < 2 or len(words) > 3 or FIRM_WORDS.search(name):
+        return True
+    return not all(re.fullmatch(r"[A-ZÀ-Ý][a-zà-ÿ]+(?:-[A-ZÀ-Ý][a-zà-ÿ]+)*", w) for w in words)
+
+
+async def new_fund(cala: Cala, name: str, ledger: Ledger) -> dict | None:
+    """The last fund this investor raised, from Cala's knowledge search. Cala writes the answer; it is kept only when a
+    passage Cala returns with it carries the firm, the word fund, the size and the year. What is shown is what that passage bears out."""
+    body = {"input": FUND_Q.format(name=name)}
+    try:
+        d = await cala.call("POST", "/knowledge/search", body=body, ledger=ledger)
+    except BudgetExceeded:
+        d = await cala.call("POST", "/knowledge/search", body=body, ledger=ledger, cache_only=True)
+    except CalaError:
+        return None
+    m = FUND_LINE.search(((d or {}).get("content") or "").replace("*", ""))
+    if not m:
+        return None
+    fund, size, when = (x.strip() for x in m.groups())
+    year = re.search(r"\b(20\d\d)\b", when)
+    amount = re.search(r"([$€£])\s?(\d+(?:[.,]\d+)?)\s*(billion|million|bn|b|m)\b", size, re.I)
+    if not year or not amount:
+        return None
+    num = amount.group(2).replace(",", ".")
+    firm = (graph.firm_words(name) or [name.split()[0].lower()])[0]
+    # Cala files some people as funds. A name that reads as a person's gets a fund only when the fund carries that name.
+    if not _firm_like(name) and firm.lower() not in fund.lower():
+        return None
+    for c in d.get("context") or []:
+        txt = c.get("content") or ""
+        low = txt.lower()
+        origin = ((c.get("origins") or [{}])[0] or {})
+        src = origin.get("source") or {}
+        url = src.get("url") or (origin.get("document") or {}).get("url")
+        # the year stands in the passage, or in the address of the page it is from (…/2025/02/05/…)
+        if firm.lower() not in low or "fund" not in low or (year.group(1) not in txt and not re.search(rf"/{year.group(1)}/", url or "")):
+            continue
+        near = False
+        for hit in re.finditer(rf"(?<![\d.,]){re.escape(num)}(?:[.,]0+)?\s*(?:m\b|mn\b|million|b\b|bn\b|billion)|[$€£]\s?{re.escape(num)}(?![\d.,]*\d)", txt, re.I):
+            around = low[max(0, hit.start() - 260):hit.end() + 260]
+            if firm.lower() in around and "fund" in around:
+                near = True
+                break
+        if not near:
+            continue
+        mm = FUND_MONTH.search(when)
+        date = f"{year.group(1)}-{'janfebmaraprmayjunjulaugsepoctnovdec'.index(mm.group(1).lower()[:3]) // 3 + 1:02d}" if mm else year.group(1)
+        unit = "B" if amount.group(3).lower().startswith("b") else "M"
+        named = fund if fund.lower() in low else None
+        host = re.sub(r"^https?://(www\.)?", "", url or "").split("/")[0] or src.get("name")
+        return {"name": named, "size": f"{amount.group(1)}{num}{unit}", "date": date,
+                "when": f"{walk.MONTHS[int(date[5:7]) - 1]} {date[:4]}" if len(date) > 4 else date, "url": url, "publisher": host}
+    return None
+
+
 async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
     """inputs: sector, stage (code), place, like [names], mine [{name, ids}] (the investors the founder already has)."""
     t0 = time.time()
@@ -574,6 +680,21 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             c["website"] = prof.get("website")
             c["description"] = graph.fix_text(prof.get("description"))
 
+    def promise(c: dict) -> float:   # the order before the signals are counted: its rounds here, then its own record
+        o = c.get("own") or {}
+        return c.get("base", 0.0) + 0.3 * min(o.get("led_at_stage", 0), 5) + 0.08 * min(o.get("at_stage", 0), 10) + 0.1 * min(o.get("recent", 0), 6)
+
+    busy = sorted((c for c in front if c.get("own") and c["kind"] != "person"), key=lambda c: (-promise(c), c["name"]))[:LATEST_INVESTORS]
+
+    async def fund_of(c: dict) -> dict | None:
+        try:
+            return await asyncio.wait_for(new_fund(cala, c["name"], ledger), FUND_SECONDS)
+        except (asyncio.TimeoutError, CalaError, BudgetExceeded):
+            return None
+
+    # asked now, answered while the graph is read further (Cala's knowledge search takes its time)
+    fund_task = asyncio.gather(*(fund_of(c) for c in busy[:FUND_ASKS]))
+
     # 6. a way in: a round it led with one of the founder's known investors in it, or a round they both sat in
     if mine:
         in_front = {c["key"] for c in front}
@@ -731,6 +852,81 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             if not level:
                 break
 
+    # 6c. what each front-runner did lately. Its latest rounds in Cala are read with the company, everyone in the round,
+    #     and the industries Cala files that company under: investor -> round -> company -> industry. From those come
+    #     its recent rounds in the founder's field and who it invests with.
+    async def held_first(fn, ids: list[str], fresh: int) -> list[dict | None]:
+        hits = list(await asyncio.gather(*(fn(cala, i, ledger=ledger, cache_only=True) for i in ids)))
+        miss = [n for n, h in enumerate(hits) if h is None][:fresh]
+        for n, x in zip(miss, await asyncio.gather(*(read(fn, ids[n]) for n in miss))):
+            hits[n] = x
+        return hits
+
+    picks3 = []
+    for c in busy:
+        rows = [r for r in c["own"]["rows"] if not NOT_EQUITY.search(r.get("label") or "")]
+        rows.sort(key=lambda r: _first_report(r["sources"]) or "", reverse=True)
+        picks3 += [(c, r) for r in rows[:LATEST_ROUNDS]]
+    todo3 = list(dict.fromkeys(r["id"] for _, r in picks3 if r["id"] not in round_read))
+    latest_read = 0
+    for rid, rd in zip(todo3, await held_first(graph.funding_round, todo3, LATEST_FRESH)):
+        if rd:
+            round_read[rid] = rd
+            latest_read += 1
+    co_held = {c["id"]: c for c in companies}
+    issuer_of = lambda rid: (round_read.get(rid) or {}).get("issuer") or {}   # noqa: E731
+    need3 = list(dict.fromkeys(issuer_of(r["id"]).get("id") for _, r in picks3 if issuer_of(r["id"]).get("id") and issuer_of(r["id"])["id"] not in co_held))
+    for cid, p in zip(need3, await held_first(graph.company, need3, LATEST_FRESH)):
+        if p:
+            co_held[cid] = p
+    field_ids = {c["id"] for c in companies}
+    for c, r in picks3:
+        rd, issuer = round_read.get(r["id"]), issuer_of(r["id"])
+        if not rd or not issuer.get("name"):
+            continue
+        p = co_held.get(issuer.get("id")) or {}
+        inds = [i["name"] for i in p.get("industries") or []][:3]
+        others = list(dict.fromkeys(_name(i["name"]) for i in rd["investors"]
+                                    if i["kind"] != "person" and _key(i["name"]) != c["key"] and i["id"] not in c["ids"]
+                                    and _key(i["name"]) not in graph.NOT_INVESTORS and not walk._no_name(i["name"])))
+        row = {"company": issuer["name"], "company_id": issuer.get("id"), "round": rd["id"], "stage": rd["stage"], "stage_name": rd["stage_name"],
+               "date": _when(rd) or _first_report(r["sources"]), "led": bool(r["is_lead"]),
+               "money": walk._money(rd["amount"], rd["currency"]) if rd.get("amount") else None,
+               "with": others[:3], "n_with": len(others), "industries": inds,
+               "in_field": issuer.get("id") in field_ids or _in_field(sector, inds, p.get("description")),
+               "url": next((x["url"] for x in (r["sources"] or []) + (rd.get("sources") or []) if x.get("url")), None)}
+        same = next((k for k in c.setdefault("latest", []) if k["stage"] == row["stage"] and _first_word(k["company"]) == _first_word(row["company"])
+                     and (k["company"] == row["company"] or (k["date"] or "")[:7] == (row["date"] or "")[:7])), None)
+        if not same:
+            c["latest"].append(row)
+        elif len(row["company"]) < len(same["company"]):
+            same["company"] = row["company"]   # the shorter of the two names Cala has for it
+    # who each of them invests with: the funds in the most rounds next to it, over every round read here
+    seats: dict[str, dict[str, set]] = {c["key"]: collections.defaultdict(set) for c in busy}
+    seat_name: dict[str, str] = {}
+    seat_co: dict[tuple[str, str], str] = {}
+    for rd in round_read.values():
+        deal = (_first_word((rd.get("issuer") or {}).get("name") or "") or rd["id"], rd.get("stage"))
+        keys = {}
+        for i in rd.get("investors") or []:
+            k = _key(i["name"])
+            if k and i["kind"] != "person" and k not in graph.NOT_INVESTORS and not walk._no_name(i["name"]) and not HUBS.search(i["name"]) and not CROWDS.search(i["name"]):
+                keys[k] = _short(_name(i["name"]))
+        for k in keys:
+            if k in seats:
+                for o, nm in keys.items():
+                    if o != k:
+                        seats[k][o].add(deal)
+                        seat_name.setdefault(o, nm)
+                        seat_co.setdefault((k, o), (rd.get("issuer") or {}).get("name") or "")
+    for c in busy:
+        c["latest"] = sorted(c.get("latest") or [], key=lambda x: x["date"] or "", reverse=True)
+        tops = sorted(seats[c["key"]].items(), key=lambda kv: (-len(kv[1]), kv[0] not in mine_keys, seat_name[kv[0]]))
+        c["cos"] = [{"name": seat_name[o], "rounds": len(ds), "company": seat_co.get((c["key"], o)) or None, "yours": o in mine_keys}
+                    for o, ds in tops if len(ds) >= 2 or o in mine_keys][:4]
+    for c, fd in zip(busy[:FUND_ASKS], await fund_task):
+        c["fund"] = fd
+
     # 7. the signals, and the order they give
     stage_name = graph.STAGE_NAMES.get(want or "", None)
     n_cos = len(companies)
@@ -761,6 +957,25 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
         else:
             text = "Cala shows it in no company like yours"
         sig.append({"id": "field", "label": "Your field", "on": n_field > 0, "text": text, "n": n_field})
+        # lately, in the field: its rounds in companies like yours, and its own latest rounds whose company Cala files under the field
+        lately = [{"company": d["company"], "stage_name": d["stage_name"], "date": d["date"], "led": d["led"], "like": True} for d in c["deals"] if d["date"]]
+        for x in c.get("latest") or []:
+            if x["in_field"] and x["date"] and not any(graph.norm(k["company"]) == graph.norm(x["company"]) for k in lately):
+                lately.append({"company": x["company"], "stage_name": x["stage_name"], "date": x["date"], "led": x["led"], "like": False})
+        lately = sorted((x for x in lately if (walk._months_ago(x["date"]) or 99) <= RECENT_MONTHS), key=lambda x: x["date"], reverse=True)
+        extra = [x for x in lately if not x["like"]]
+        if lately:
+            said_l = "; ".join(f"{x['company']} {_st(x['stage_name'])}, {walk._month(x['date'])}" + (" (led)" if x["led"] else "") for x in lately[:3])
+            sig.append({"id": "lately", "label": "Recent in your field", "on": True, "n": len(lately),
+                        "text": f"{walk._plural(len(lately), 'round')} in the last {RECENT_MONTHS} months: {said_l}" + (f", and {len(lately) - 3} more" if len(lately) > 3 else "")})
+        elif c.get("latest"):
+            newest = c["latest"][0]
+            sig.append({"id": "lately", "label": "Recent in your field", "on": False,
+                        "text": (f"None of its {len(c['latest'])} latest rounds in Cala is in your field; the newest is {newest['company']}, {walk._month(newest['date'])}"
+                                 if len(c["latest"]) > 1 else f"Its latest round in Cala is not in your field: {newest['company']}, {walk._month(newest['date'])}")})
+        elif not (own and own["rounds"]):
+            sig.append({"id": "lately", "label": "Recent in your field", "on": False,
+                        "text": "Cala holds no round under its own record, only its name on a company's list of investors"})
         # leading
         if own and own["rounds"]:
             n = walk._plural(own["rounds"], "round")
@@ -795,6 +1010,13 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
                         "text": "; ".join(bits)})
         elif own:
             sig.append({"id": "recent", "label": "Active now", "on": False, "text": "No round reported in the last 12 months"})
+        # a fund raised lately: money to invest. Cala's knowledge search says so, and the passage it returns carries the size and the year
+        fund = c.get("fund")
+        if fund:
+            f_months = walk._months_ago(fund["date"] + ("-07-01" if len(fund["date"]) == 4 else "-15"))
+            sig.append({"id": "fund", "label": "New fund", "on": f_months is not None and f_months <= FUND_MONTHS,
+                        "text": " ".join(x for x in (fund["size"], f"fund ({fund['name']})" if fund["name"] else "fund", f"closed {fund['when']}") if x)
+                                + (f", reported by {fund['publisher']}" if fund.get("publisher") else ""), "url": fund.get("url")})
         # the size of its rounds here goes with the stage: the founder gave no size to hold it against
         span = _money_span([d for d in deals if not want or d["stage"] == want] or deals)
         if span:
@@ -861,6 +1083,9 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
             else:
                 add(0.2 * min(own["led"], 5), f"its own record: {walk._plural(own['led'], 'round')} led")
             add(0.1 * min(own["recent"], 6), f"{walk._plural(own['recent'], 'round')} in the last 12 months")
+        add(0.25 * min(len(extra), 3), f"{walk._plural(len(extra), 'more recent round')} in your field, from its own record")
+        if fund and any(sg["id"] == "fund" and sg["on"] for sg in sig):
+            add(0.3, f"a fund closed {fund['when']}: money to invest")
         score = sum(x["points"] for x in parts)
         times = []
         if near:
@@ -922,6 +1147,7 @@ async def scout(cala: Cala, inputs: dict, emit: Emit | None = None) -> dict:
                      | {"money": walk._money(d["amount"], d["currency"]) if d["amount"] else None} for d in ways_led[:4]],
             "backed": (c["backed"] + also)[:6], "hq": (hq or {}).get("text"), "website": c.get("website"), "description": c.get("description"),
             "own": {k: own[k] for k in ("rounds", "led", "at_stage", "led_at_stage", "capped", "portfolio", "recent")} if own else None,
+            "latest": c.get("latest") or [], "cos": c.get("cos") or [], "fund": c.get("fund"),
             "path": c.get("path") or []})
     # First the investors Cala holds in companies like the founder's, by score. Then the ones found only next to the
     # founder's investors: a way in, but nothing in Cala says they invest in this field.
@@ -1149,6 +1375,12 @@ def text(r: dict, url: str) -> str:
         for s in x["signals"]:
             if s["id"] != "field" or x["companies"] > 1:
                 out.append(f"   - {'yes' if s['on'] else 'further away' if s.get('far') else 'no'} · {s['label']}: {s['text']}")
+        if x.get("latest"):
+            out.append("   - Its latest rounds in Cala: " + "; ".join(
+                f"{l['company']} {_st(l['stage_name'])}, {walk._month(l['date'])}" + (", led per Cala" if l["led"] else "")
+                + (f" [{', '.join(l['industries'][:2])}]" if l["industries"] else "") + (" (your field)" if l["in_field"] else "") for l in x["latest"][:4]))
+        if x.get("cos"):
+            out.append("   - Invests with, in the rounds read here: " + ", ".join(f"{k['name']} ({walk._plural(k['rounds'], 'round')})" for k in x["cos"][:4]))
         if x.get("proof"):
             p = x["proof"]
             out.append(f"   - The page says: \"{p['quote']}\" ({p['url']})")

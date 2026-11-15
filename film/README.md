@@ -2,8 +2,9 @@
 
 Films of Soft Yes, made from recordings of the live product.
 
-- `out/film.mp4` (1:43) is the film to show: the 10 s cold open, then `out/demo-3.mp4`. The site serves it at `/film.mp4`.
-- `out/demo-3.mp4` (93 s) is the current cut: Soft Yes inside Claude. How it is made: "The cut made inside Claude" below.
+- `out/film.mp4` (1:56) is the film to show. The site serves it at `/film.mp4`. In order: the 10 s cold open, a clip of
+  the team, Soft Yes inside Claude read by the founder, the closing card and the team's sign-off.
+- `out/demo-3.mp4` is that cut as it is rendered; `join.sh` copies it to `out/film.mp4`. How it is made: "The cut made inside Claude" below.
 - `out/demo-2.mp4` (87 s) shows the website; `out/screenshot.png` is its reveal frame (the walk folded into the ranked list).
 - `out/demo-v1.mp4` is the first, two minute cut (a copy is at `../judging/demo.mp4`).
 
@@ -40,26 +41,30 @@ sheets (about 15 seconds). `node scripts/reveal.mjs` prints the second of the re
 
 ## The cut made inside Claude
 
-`out/demo-3.mp4`: the question typed into claude.ai, the search drawing in the chat, the list with the way in
-link by link and the sum behind the first place, the soft yes with the lead the page corrects, the ask written
-in the card. Its run output is under `/bulk3/runs/cala/film-claude/`.
+`out/demo-3.mp4`: the cold open, the team on camera, then Soft Yes in claude.ai: the question typed, companies like
+yours and their investors drawing in the chat, the eight signals on each investor, the first investor's latest
+rounds, the way in link by link, the soft yes, the closing card and the team saying thanks. The founder reads the
+lines himself. Its run output is under `/bulk3/runs/cala/film-claude/`.
 
 ```sh
 export FILM_BULK=/bulk3/runs/cala/film-claude
-# 1. record the five shots in a signed-in Claude (cfind and cwalk each send one message; clist, cfix and cdraft reopen those chats)
+# 1. record the shots in a signed-in Claude (cfind sends one message; cinv and csoft reopen finished chats)
 python3 film/capture/claude_session.py
-film/capture/quiet-net.sh run uv run -q --offline --with playwright python film/capture/claude_shots.py cfind cwalk clist cfix cdraft
-# 2. voice, render, review (CONCURRENCY keeps the render small on a shared machine)
-cd film && hsec exec --only ELEVENLABS_HELIOS_API_KEY -- bash -c 'ELEVENLABS_API_KEY="$ELEVENLABS_HELIOS_API_KEY" node scripts/make-vo.mjs --cut3' \
+film/capture/quiet-net.sh run uv run -q --offline --with playwright python film/capture/claude_shots.py cfind cinv csoft
+# 2. the voice: a recording of someone reading the lines (`node scripts/make-vo.mjs --cut3 --json` prints them).
+#    Re-read a line as often as you like: the last whole take of each line is kept.
+cd film && python3 scripts/voice-in.py RECORDING.mp4 --name touko
+# 3. the team's two clips: cut to the speech, the sound levelled, captions from their own words
+python3 scripts/team-in.py
+# 4. the lines with their timing, render, review (CONCURRENCY keeps the render small on a shared machine)
+node scripts/make-vo.mjs --cut3 --recorded $FILM_BULK/public/audio/touko/touko.json \
   && CONCURRENCY=12 ./render.sh 3 && scripts/review.sh out/demo-3.mp4
-# 3. the cold open in front: out/film.mp4
-(cd ~/junction/opens && python3 softyes/refresh.py --check) && ./join.sh
+# 5. out/film.mp4
+./join.sh
 ```
 
-- The open is `/bulk3/runs/opens/final/softyes/open.mp4` (made in `~/junction/opens/softyes/`, notes in that folder's
-  README). It ends on the film's own window with nothing in it, so `join.sh` brings the film's first screen up
-  inside it. `OPEN_MUTE=1 ./join.sh` leaves the open silent. If the film's first frame changes (another window
-  or background), the open's last frame has to be made again first: steps in the open's README.
+- The open is `/bulk3/runs/opens/final/softyes/open.mp4` (made in `~/junction/opens/softyes/`). It is the film's first
+  scene: `src/Film.tsx` plays its picture and its sound under the first line.
 - In the shots the pointer rests next to what it shows, never on a name or a number.
 
 - The shots need a Claude session with the Soft Yes connector on and its tools on "Always allow".
@@ -68,8 +73,9 @@ cd film && hsec exec --only ELEVENLABS_HELIOS_API_KEY -- bash -c 'ELEVENLABS_API
 - `src/scenes3.tsx` is the edit, `src/data/cap3.json` what the shots saw, `src/data/vo3.json` the spoken lines,
   `src/data/timing3.json` the scene order.
 - A quick look without a full render: `COMP=Film3Silent scripts/sheets.sh`.
-- The music is a bed made for this length (`public/audio/music-c3-94.mp3`; `--music` makes a new one when the length changes).
-- The voice key is `ELEVENLABS_HELIOS_API_KEY` (the Helios grant). `ELEVENLABS_API_KEY` has no credits until about 5 Dec.
+- The music is one bed under everything after the open (`public/audio/music-c4-115.mp3`); it ducks under the voice
+  and under the team's clips. `src/data/timing3.json` says where it starts (`musicFrom`).
+- No voice is generated for this cut: every spoken line is the founder's recording or the team's own clip.
 
 ## What is where
 
